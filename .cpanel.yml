@@ -17,7 +17,7 @@ deployment:
     # Sync repository files to the deploy target path, excluding .git folder.
     - /bin/rsync -aP --exclude '.git' --exclude '.well-known' ${REPOPATH}/ ${DEPLOYPATH}
     # Run the replacement script.
-    #- /bin/bash /home/emmyther/backup/replace.sh    
+    - /bin/bash /home/emmyther/backup/replace.sh    
     # Set correct permissions.
     - /bin/bash /home/emmyther/backup/chmod.sh
 #    - /bin/chmod 755 ${DEPLOYPATH}
