@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\{A, BR, VIDEO, SOURCE, emptyHTML};
+use function MicroHTML\{A, BR, SOURCE, VIDEO, emptyHTML};
 
 class VideoFileHandlerTheme extends Themelet
 {
     public function display_image(Image $image): void
     {
-        global $config, $page;
-
         $width = "auto";
         if ($image->width > 1) {
             $width = $image->width."px";
@@ -32,20 +30,20 @@ class VideoFileHandlerTheme extends Themelet
                     'class' => 'shm-main-image',
                     'id' => 'main_image',
                     'alt' => 'main image',
-                    'poster' => make_http($image->get_thumb_link()),
-                    'autoplay' => $config->get_bool(VideoFileHandlerConfig::PLAYBACK_AUTOPLAY),
-                    'loop' => $config->get_bool(VideoFileHandlerConfig::PLAYBACK_LOOP),
-                    'muted' => $config->get_bool(VideoFileHandlerConfig::PLAYBACK_MUTE),
+                    'poster' => $image->get_thumb_link()->asAbsolute(),
+                    'autoplay' => Ctx::$config->get(VideoFileHandlerConfig::PLAYBACK_AUTOPLAY),
+                    'loop' => Ctx::$config->get(VideoFileHandlerConfig::PLAYBACK_LOOP),
+                    'muted' => Ctx::$config->get(VideoFileHandlerConfig::PLAYBACK_MUTE),
                     'style' => "height: $height; width: $width; max-width: 100%; object-fit: contain; background-color: black;",
                     'onloadstart' => 'this.volume = 0.25',
                 ],
                 SOURCE([
                     'src' => $image->get_image_link(),
-                    'type' => strtolower($image->get_mime())
+                    'type' => $image->get_mime()
                 ])
             )
         );
 
-        $page->add_block(new Block("Video", $html, "main", 10));
+        Ctx::$page->add_block(new Block(null, $html, "main", 10));
     }
 }

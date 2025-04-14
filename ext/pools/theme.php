@@ -4,14 +4,13 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use function MicroHTML\{A,BR,DIV,INPUT,P,SPAN,TABLE,TBODY,TD,TEXTAREA,TH,THEAD,TR};
+use function MicroHTML\emptyHTML;
+
 use MicroHTML\HTMLElement;
 
-use function MicroHTML\emptyHTML;
-use function MicroHTML\rawHTML;
-use function MicroHTML\{A,BR,DIV,INPUT,P,SCRIPT,SPAN,TABLE,TBODY,TD,TEXTAREA,TH,THEAD,TR};
-
 /**
- * @phpstan-type PoolHistory array{id:int,pool_id:int,title:string,user_name:string,action:string,images:string,count:int,date:string}
+ * @phpstan-type PoolHistory array{id:int,pool_id:int,title:string,user_name:string,action:int,images:string,count:int,date:string}
  */
 class PoolsTheme extends Themelet
 {
@@ -23,19 +22,17 @@ class PoolsTheme extends Themelet
      */
     public function pool_info(array $navIDs): void
     {
-        global $page;
-
         //TODO: Use a 3 column table?
         $linksPools = emptyHTML();
         foreach ($navIDs as $poolID => $poolInfo) {
-            $div = DIV(SHM_A("pool/view/" . $poolID, $poolInfo["info"]->title));
+            $div = DIV(A(["href" => "pool/view/" . $poolID], $poolInfo["info"]->title));
 
             if (!empty($poolInfo["nav"])) {
                 if (!empty($poolInfo["nav"]["prev"])) {
-                    $div->appendChild(SHM_A("post/view/" . $poolInfo["nav"]["prev"], "Prev", class: "pools_prev_img"));
+                    $div->appendChild(A(["href" => make_link("post/view/" . $poolInfo["nav"]["prev"]), "class" => "pools_prev_img"], "Prev"));
                 }
                 if (!empty($poolInfo["nav"]["next"])) {
-                    $div->appendChild(SHM_A("post/view/" . $poolInfo["nav"]["next"], "Next", class: "pools_next_img"));
+                    $div->appendChild(A(["href" => make_link("post/view/" . $poolInfo["nav"]["next"]), "class" => "pools_next_img"], "Next"));
                 }
             }
 
@@ -43,7 +40,7 @@ class PoolsTheme extends Themelet
         }
 
         if (!empty($navIDs)) {
-            $page->add_block(new Block("Pools", $linksPools, "left"));
+            Ctx::$page->add_block(new Block("Pools", $linksPools, "left"));
         }
     }
 
@@ -52,13 +49,13 @@ class PoolsTheme extends Themelet
      *
      * @param Pool[] $pools
      */
-    public function list_pools(Page $page, array $pools, string $search, int $pageNumber, int $totalPages): void
+    public function list_pools(array $pools, string $search, int $pageNumber, int $totalPages): void
     {
         // Build up the list of pools.
         $pool_rows = [];
         foreach ($pools as $pool) {
-            $pool_link = SHM_A("pool/view/" . $pool->id, $pool->title);
-            $user_link = SHM_A("user/" . url_escape($pool->user_name), $pool->user_name ?? "No Name");
+            $pool_link = A(["href" => make_link("pool/view/" . $pool->id)], $pool->title);
+            $user_link = A(["href" => make_link("user/" . url_escape($pool->user_name))], $pool->user_name ?? "No Name");
 
             $pool_rows[] = TR(
                 TD(["class" => "left"], $pool_link),
@@ -75,26 +72,25 @@ class PoolsTheme extends Themelet
         );
 
         $order_arr = ['created' => 'Recently created', 'updated' => 'Last updated', 'name' => 'Name', 'count' => 'Post Count'];
-        $order_selected = $page->get_cookie('ui-order-pool') ?? "";
+        $order_selected = Ctx::$page->get_cookie('ui-order-pool') ?? "";
         $order_sel = SHM_SELECT("order_pool", $order_arr, selected_options: [$order_selected], attrs: ["id" => "order_pool"]);
 
         $this->display_top(null, "Pools");
-        $page->add_block(new Block("Order By", $order_sel, "left", 15));
+        Ctx::$page->add_block(new Block("Order By", $order_sel, "left", 15));
+        Ctx::$page->add_block(new Block("Pools", $table, position: 10));
 
-        $page->add_block(new Block("Pools", $table, position: 10));
-
-        if ($search != "" and !str_starts_with($search, '/')) {
+        if ($search !== "" and !str_starts_with($search, '/')) {
             $search = '/'.$search;
         }
-        $this->display_paginator($page, "pool/list".$search, null, $pageNumber, $totalPages);
+        $this->display_paginator("pool/list".$search, null, $pageNumber, $totalPages);
     }
 
     /*
      * HERE WE DISPLAY THE NEW POOL COMPOSER
      */
-    public function new_pool_composer(Page $page): void
+    public function new_pool_composer(): void
     {
-        $form = SHM_SIMPLE_FORM("pool/create", TABLE(
+        $form = SHM_SIMPLE_FORM(make_link("pool/create"), TABLE(
             TR(TD("Title:"), TD(INPUT(["type" => "text", "name" => "title"]))),
             TR(TD("Public?:"), TD("Yes", INPUT(["type" => "radio", "name" => "public", "value" => "Y", "checked" => "checked"]), "No", INPUT(["type" => "radio", "name" => "public", "value" => "N"]))),
             TR(TD("Description:"), TD(TEXTAREA(["name" => "description"]))),
@@ -102,51 +98,54 @@ class PoolsTheme extends Themelet
         ));
 
         $this->display_top(null, "Create Pool");
-        $page->add_block(new Block("Create Pool", $form, position: 20));
+        Ctx::$page->add_block(new Block("Create Pool", $form, position: 20));
     }
 
     private function display_top(?Pool $pool, string $heading, bool $check_all = false): void
     {
-        global $page, $user;
-
-        $page->set_title($heading);
-
         $poolnav = emptyHTML(
-            SHM_A("pool/list", "Pool Index"),
+            A(["href" => make_link("pool/list")], "Pool Index"),
             BR(),
-            SHM_A("pool/new", "Create Pool"),
+            A(["href" => make_link("pool/new")], "Create Pool"),
             BR(),
-            SHM_A("pool/updated", "Pool Changes")
+            A(["href" => make_link("pool/updated")], "Pool Changes")
         );
 
-        $search = "<form action='".make_link('pool/list')."' method='POST'>
-				<input name='search' type='text'  style='width:75%'>
-				<input type='submit' value='Go' style='width:20%'>
-			</form>";
+        $search = SHM_SIMPLE_FORM(
+            make_link('pool/list'),
+            INPUT([
+                "name" => "search",
+                "type" => "text",
+                "style" => "width:75%"
+            ]),
+            INPUT([
+                "type" => "submit",
+                "value" => "Go",
+                "style" => "width:20%"
+            ])
+        );
 
-        $page->add_block(new NavBlock());
+        $page = Ctx::$page;
+        $page->set_title($heading);
+        $this->display_navigation();
         $page->add_block(new Block("Pool Navigation", $poolnav, "left", 10));
-        $page->add_block(new Block("Search", rawHTML($search), "left", 10));
+        $page->add_block(new Block("Search", $search, "left", 10));
 
         if (!is_null($pool)) {
-            if ($pool->public || $user->can(Permissions::POOLS_ADMIN)) {// IF THE POOL IS PUBLIC OR IS ADMIN SHOW EDIT PANEL
-                if (!$user->is_anonymous()) {// IF THE USER IS REGISTERED AND LOGGED IN SHOW EDIT PANEL
-                    $this->sidebar_options($page, $pool, $check_all);
+            if ($pool->public || Ctx::$user->can(PoolsPermission::ADMIN)) {// IF THE POOL IS PUBLIC OR IS ADMIN SHOW EDIT PANEL
+                if (Ctx::$user->can(PoolsPermission::UPDATE)) {// IF THE USER IS REGISTERED AND LOGGED IN SHOW EDIT PANEL
+                    $this->sidebar_options($pool, $check_all);
                 }
             }
-            $page->add_block(new Block($pool->title, rawHTML(format_text($pool->description)), "main", 10));
+            $page->add_block(new Block($pool->title, format_text($pool->description), "main", 10));
         }
     }
 
     /**
-     * HERE WE DISPLAY THE POOL WITH TITLE DESCRIPTION AND IMAGES WITH PAGINATION.
-     *
      * @param Image[] $images
      */
     public function view_pool(Pool $pool, array $images, int $pageNumber, int $totalPages): void
     {
-        global $page;
-
         $this->display_top($pool, "Pool: " . html_escape($pool->title));
 
         $image_list = DIV(["class" => "shm-image-list"]);
@@ -154,97 +153,63 @@ class PoolsTheme extends Themelet
             $image_list->appendChild($this->build_thumb($image));
         }
 
-        $page->add_block(new Block("Viewing Posts", $image_list, "main", 30));
-        $this->display_paginator($page, "pool/view/" . $pool->id, null, $pageNumber, $totalPages);
+        Ctx::$page->add_block(new Block("Viewing Posts", $image_list, "main", 30));
+        $this->display_paginator("pool/view/" . $pool->id, null, $pageNumber, $totalPages);
     }
 
-
-    /**
-     * HERE WE DISPLAY THE POOL OPTIONS ON SIDEBAR BUT WE HIDE REMOVE OPTION IF THE USER IS NOT THE OWNER OR ADMIN.
-     */
-    public function sidebar_options(Page $page, Pool $pool, bool $check_all): void
+    public function sidebar_options(Pool $pool, bool $check_all): void
     {
-        global $user;
-
         $editor = emptyHTML(
             SHM_SIMPLE_FORM(
-                "pool/import/{$pool->id}",
+                make_link("pool/import/{$pool->id}"),
                 INPUT(["type" => "text", "name" => "pool_tag", "id" => "edit_pool_tag", "placeholder" => "Please enter a tag", "class" => "autocomplete_tags"]),
                 SHM_SUBMIT("Import", ["name" => "edit", "id" => "edit_pool_import_btn"])
             ),
             SHM_SIMPLE_FORM(
-                "pool/edit/{$pool->id}",
+                make_link("pool/edit/{$pool->id}"),
                 SHM_SUBMIT("Edit Pool", ["name" => "edit", "id" => "edit_pool_btn"]),
             ),
             SHM_SIMPLE_FORM(
-                "pool/order/{$pool->id}",
+                make_link("pool/order/{$pool->id}"),
                 SHM_SUBMIT("Order Pool", ["name" => "edit", "id" => "edit_pool_order_btn"])
             ),
             SHM_SIMPLE_FORM(
-                "pool/reverse/{$pool->id}",
+                make_link("pool/reverse/{$pool->id}"),
                 SHM_SUBMIT("Reverse Order", ["name" => "edit", "id" => "reverse_pool_order_btn"])
             ),
             SHM_SIMPLE_FORM(
-                "post/list/pool_id=" . $pool->id . "/1",
+                search_link(["pool_id=" . $pool->id]),
                 SHM_SUBMIT("Post/List View", ["name" => "edit", "id" => $pool->id])
             )
         );
 
-        if ($user->id == $pool->user_id || $user->can(Permissions::POOLS_ADMIN)) {
+        if (Ctx::$user->id === $pool->user_id || Ctx::$user->can(PoolsPermission::ADMIN)) {
             $editor->appendChild(
-                SCRIPT(
-                    ["type" => "text/javascript"],
-                    rawHTML("<!--
-                    function confirm_action() {
-                        return confirm('Are you sure that you want to delete this pool?');
-                    }
-                    //-->")
-                ),
                 SHM_SIMPLE_FORM(
-                    "pool/nuke/{$pool->id}",
-                    SHM_SUBMIT("Delete Pool", ["name" => "delete", "id" => "delete_pool_btn", "onclick" => "return confirm_action()"])
+                    make_link("pool/nuke/{$pool->id}"),
+                    SHM_SUBMIT("Delete Pool", ["name" => "delete", "id" => "delete_pool_btn", "onclick" => "return confirm('Are you sure that you want to delete this pool?')"])
                 )
             );
         }
 
         if ($check_all) {
             $editor->appendChild(
-                SCRIPT(
-                    ["type" => "text/javascript"],
-                    rawHTML("<!--
-                    function setAll(value) {
-                        $('[name=\"check[]\"]').attr('checked', value);
-                    }
-                    //-->")
-                ),
-                INPUT(["type" => "button", "name" => "CheckAll", "value" => "Check All", "onclick" => "setAll(true)"]),
-                INPUT(["type" => "button", "name" => "UnCheckAll", "value" => "Uncheck All", "onclick" => "setAll(false)"])
+                INPUT(["type" => "button", "name" => "CheckAll", "value" => "Check All", "onclick" => "$('[name=\"check[]\"]').attr('checked', true)"]),
+                INPUT(["type" => "button", "name" => "UnCheckAll", "value" => "Uncheck All", "onclick" => "$('[name=\"check[]\"]').attr('checked', false)"])
             );
         }
 
-        $page->add_block(new Block("Manage Pool", $editor, "left", 15));
+        Ctx::$page->add_block(new Block("Manage Pool", $editor, "left", 15));
     }
 
     /**
-     * HERE WE DISPLAY THE RESULT OF THE SEARCH ON IMPORT.
-     *
      * @param Image[] $images
      */
-    public function pool_result(Page $page, array $images, Pool $pool): void
+    public function pool_result(array $images, Pool $pool): void
     {
         $this->display_top($pool, "Importing Posts", true);
 
-        $import = emptyHTML(
-            SCRIPT(
-                ["type" => "text/javascript"],
-                rawHTML("
-                function confirm_action() {
-                    return confirm('Are you sure you want to add selected posts to this pool?');
-                }")
-            )
-        );
-
-        $form = SHM_FORM("pool/add_posts/{$pool->id}", name: "checks");
+        $form = SHM_FORM(make_link("pool/add_posts/{$pool->id}"), name: "checks");
         $image_list = DIV(["class" => "shm-image-list"]);
         foreach ($images as $image) {
             $image_list->appendChild(
@@ -252,15 +217,12 @@ class PoolsTheme extends Themelet
             );
         }
         $form->appendChild($image_list);
-
         $form->appendChild(
             BR(),
-            SHM_SUBMIT("Add Selected", ["name" => "edit", "id" => "edit_pool_add_btn", "onclick" => "return confirm_action()"]),
+            SHM_SUBMIT("Add Selected", ["name" => "edit", "id" => "edit_pool_add_btn", "onclick" => "return confirm('Are you sure you want to add selected posts to this pool?')"]),
         );
 
-        $import->appendChild($form);
-
-        $page->add_block(new Block("Import", $import, "main", 30));
+        Ctx::$page->add_block(new Block("Import", $form, "main", 30));
     }
 
 
@@ -270,11 +232,11 @@ class PoolsTheme extends Themelet
      *
      * @param Image[] $images
      */
-    public function edit_order(Page $page, Pool $pool, array $images): void
+    public function edit_order(Pool $pool, array $images): void
     {
         $this->display_top($pool, "Sorting Pool");
 
-        $form = SHM_FORM("pool/save_order/{$pool->id}", name: "checks");
+        $form = SHM_FORM(make_link("pool/save_order/{$pool->id}"), name: "checks");
         $image_list = DIV(["class" => "shm-image-list"]);
         foreach ($images as $i => $image) {
             $image_list->appendChild(SPAN(
@@ -289,7 +251,7 @@ class PoolsTheme extends Themelet
             SHM_SUBMIT("Order", ["name" => "edit", "id" => "edit_pool_order"])
         );
 
-        $page->add_block(new Block("Sorting Posts", $form, position: 30));
+        Ctx::$page->add_block(new Block("Sorting Posts", $form, position: 30));
     }
 
     /**
@@ -300,16 +262,16 @@ class PoolsTheme extends Themelet
      *
      * @param Image[] $images
      */
-    public function edit_pool(Page $page, Pool $pool, array $images): void
+    public function edit_pool(Pool $pool, array $images): void
     {
         $desc_form = SHM_SIMPLE_FORM(
-            "pool/edit_description/{$pool->id}",
+            make_link("pool/edit_description/{$pool->id}"),
             TEXTAREA(["name" => "description"], $pool->description),
             BR(),
             SHM_SUBMIT("Change Description")
         );
 
-        $images_form = SHM_FORM("pool/remove_posts/{$pool->id}", name: "checks");
+        $images_form = SHM_FORM(make_link("pool/remove_posts/{$pool->id}"), name: "checks");
         $image_list = DIV(["class" => "shm-image-list"]);
         foreach ($images as $image) {
             $image_list->appendChild(SPAN(
@@ -327,19 +289,15 @@ class PoolsTheme extends Themelet
 
         $pool->description = ""; //This is a rough fix to avoid showing the description twice.
         $this->display_top($pool, "Editing Pool", true);
-        $page->add_block(new Block("Editing Description", $desc_form, position: 28));
-        $page->add_block(new Block("Editing Posts", $images_form, position: 30));
+        Ctx::$page->add_block(new Block("Editing Description", $desc_form, position: 28));
+        Ctx::$page->add_block(new Block("Editing Posts", $images_form, position: 30));
     }
 
     /**
-     * HERE WE DISPLAY THE HISTORY LIST.
-     *
      * @param PoolHistory[] $histories
      */
     public function show_history(array $histories, int $pageNumber, int $totalPages): void
     {
-        global $page;
-
         $table = TABLE(
             ["id" => "poolsList", "class" => "zebra"],
             THEAD(TR(TH("Pool"), TH("Post Count"), TH("Changes"), TH("Updater"), TH("Date"), TH("Action")))
@@ -347,13 +305,13 @@ class PoolsTheme extends Themelet
 
         $body = [];
         foreach ($histories as $history) {
-            $pool_link = SHM_A("pool/view/" . $history["pool_id"], $history["title"]);
-            $user_link = SHM_A("user/" . url_escape($history["user_name"]), $history["user_name"]);
-            $revert_link = SHM_A(("pool/revert/" . $history["id"]), "Revert");
+            $pool_link = A(["href" => make_link("pool/view/" . $history["pool_id"])], $history["title"]);
+            $user_link = A(["href" => make_link("user/" . url_escape($history["user_name"]))], $history["user_name"]);
+            $revert_link = A(["href" => make_link("pool/revert/" . $history["id"])], "Revert");
 
-            if ($history['action'] == 1) {
+            if ($history['action'] === 1) {
                 $prefix = "+";
-            } elseif ($history['action'] == 0) {
+            } elseif ($history['action'] === 0) {
                 $prefix = "-";
             } else {
                 throw new \RuntimeException("history['action'] not in {0, 1}");
@@ -364,7 +322,7 @@ class PoolsTheme extends Themelet
 
             $image_links = emptyHTML();
             foreach ($images as $image) {
-                $image_links->appendChild(" ", SHM_A("post/view/" . $image, $prefix . $image));
+                $image_links->appendChild(" ", A(["href" => make_link("post/view/" . $image)], $prefix . $image));
             }
 
             $body[] = TR(
@@ -380,9 +338,8 @@ class PoolsTheme extends Themelet
         $table->appendChild(TBODY(...$body));
 
         $this->display_top(null, "Recent Changes");
-        $page->add_block(new Block("Recent Changes", $table, position: 10));
-
-        $this->display_paginator($page, "pool/updated", null, $pageNumber, $totalPages);
+        Ctx::$page->add_block(new Block("Recent Changes", $table, position: 10));
+        $this->display_paginator("pool/updated", null, $pageNumber, $totalPages);
     }
 
     /**
@@ -413,26 +370,11 @@ class PoolsTheme extends Themelet
     {
         return emptyHTML(
             P("Search for posts that are in a pool."),
-            SHM_COMMAND_EXAMPLE(
-                "pool=1",
-                "Returns posts in pool #1."
-            ),
-            SHM_COMMAND_EXAMPLE(
-                "pool=any",
-                "Returns posts in any pool."
-            ),
-            SHM_COMMAND_EXAMPLE(
-                "pool=none",
-                "Returns posts not in any pool."
-            ),
-            SHM_COMMAND_EXAMPLE(
-                "pool_by_name=swimming",
-                "Returns posts in the \"swimming\" pool."
-            ),
-            SHM_COMMAND_EXAMPLE(
-                "pool_by_name=swimming_pool",
-                "Returns posts in the \"swimming pool\" pool. Note that the underscore becomes a space."
-            )
+            SHM_COMMAND_EXAMPLE("pool=1", "Returns posts in pool #1"),
+            SHM_COMMAND_EXAMPLE("pool=any", "Returns posts in any pool"),
+            SHM_COMMAND_EXAMPLE("pool=none", "Returns posts not in any pool"),
+            SHM_COMMAND_EXAMPLE("pool_by_name=swimming", "Returns posts in the \"swimming\" pool"),
+            SHM_COMMAND_EXAMPLE("pool_by_name=swimming_pool", "Returns posts in the \"swimming pool\" pool. Note that the underscore becomes a space")
         );
     }
 }

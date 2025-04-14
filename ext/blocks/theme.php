@@ -4,29 +4,22 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\TABLE;
-use function MicroHTML\TR;
-use function MicroHTML\TH;
-use function MicroHTML\TD;
-use function MicroHTML\INPUT;
-use function MicroHTML\TEXTAREA;
-use function MicroHTML\rawHTML;
-use function MicroHTML\SELECT;
-use function MicroHTML\OPTION;
+use function MicroHTML\{INPUT, OPTION, SELECT, TABLE, TD, TEXTAREA, TH, TR};
 
+/**
+ * @phpstan-type BlockArray array{id:int,title:string,area:string,priority:int,userclass:string,pages:string,content:string}
+ */
 class BlocksTheme extends Themelet
 {
     /**
-     * @param array<array{id:int,title:string,area:string,priority:int,userclass:string,pages:string,content:string}> $blocks
+     * @param array<BlockArray> $blocks
      */
     public function display_blocks(array $blocks): void
     {
-        global $page;
-
         $html = TABLE(["class" => "form", "style" => "width: 100%;"]);
         foreach ($blocks as $block) {
             $html->appendChild(SHM_SIMPLE_FORM(
-                "blocks/update",
+                make_link("blocks/update"),
                 TR(
                     INPUT(["type" => "hidden", "name" => "id", "value" => $block['id']]),
                     TH("Title"),
@@ -47,13 +40,13 @@ class BlocksTheme extends Themelet
                     TD(["colspan" => "13"], TEXTAREA(["rows" => "5", "name" => "content"], $block['content']))
                 ),
                 TR(
-                    TD(["colspan" => "13"], rawHTML("&nbsp;"))
+                    TD(["colspan" => "13"], " ")
                 ),
             ));
         }
 
         $html->appendChild(SHM_SIMPLE_FORM(
-            "blocks/add",
+            make_link("blocks/add"),
             TR(
                 TH("Title"),
                 TD(INPUT(["type" => "text", "name" => "title", "value" => ""])),
@@ -72,8 +65,9 @@ class BlocksTheme extends Themelet
             ),
         ));
 
+        $page = Ctx::$page;
         $page->set_title("Blocks");
-        $page->add_block(new NavBlock());
+        $this->display_navigation();
         $page->add_block(new Block(null, $html));
     }
 }

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, ARTICLE, B, BODY, DIV, FOOTER, HEADER, IMG, NAV, SCRIPT, SECTION};
 
-use function MicroHTML\{BODY, emptyHTML, HEADER, FOOTER, DIV, SCRIPT, A, B, IMG, NAV, ARTICLE, rawHTML, SECTION};
+use MicroHTML\HTMLElement;
 
 /**
  * Name: Lite Theme
@@ -21,12 +21,10 @@ class LitePage extends Page
 {
     protected function body_html(): HTMLElement
     {
-        global $config;
-
         list($nav_links, $sub_links) = $this->get_nav_links();
-        $theme_name = $config->get_string(SetupConfig::THEME, 'lite');
-        $site_name = $config->get_string(SetupConfig::TITLE);
-        $data_href = get_base_href();
+        $theme_name = Ctx::$config->get(SetupConfig::THEME);
+        $site_name = Ctx::$config->get(SetupConfig::TITLE);
+        $data_href = Url::base();
 
         $menu = DIV(
             ["class" => "menu"],
@@ -75,7 +73,7 @@ class LitePage extends Page
         }
 
         $custom_sublinks = null;
-        if (!empty($sub_links)) {
+        if (count($sub_links) > 0) {
             $custom_sublinks = DIV(["class" => "sbar"]);
             foreach ($sub_links as $nav_link) {
                 $custom_sublinks->appendChild($this->navlinks($nav_link->link, $nav_link->description, $nav_link->active));
@@ -105,7 +103,7 @@ class LitePage extends Page
     {
         $h = $block->header;
         $i = $block->id;
-        if ($h == "Paginator") {
+        if ($h === "Paginator") {
             return $block->body;
         }
         $html = SECTION(["id" => $i]);
@@ -116,11 +114,11 @@ class LitePage extends Page
         return $html;
     }
 
-    private function navlinks(Link $link, HTMLElement|string $desc, bool $active): HTMLElement
+    private function navlinks(Url $link, HTMLElement|string $desc, bool $active): HTMLElement
     {
         return A([
             "class" => $active ? "tab-selected" : "tab",
-            "href" => $link->make_link(),
+            "href" => $link,
         ], $desc);
     }
 }

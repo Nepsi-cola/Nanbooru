@@ -4,10 +4,7 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\FORM;
-use function MicroHTML\INPUT;
-use function MicroHTML\P;
-use function MicroHTML\TEXTAREA;
+use function MicroHTML\{FORM, INPUT, TEXTAREA};
 
 class ETTheme extends Themelet
 {
@@ -16,10 +13,9 @@ class ETTheme extends Themelet
      */
     public function display_info_page(string $yaml, string $extra): void
     {
-        global $page;
-
+        $page = Ctx::$page;
         $page->set_title("System Info");
-        $page->add_block(new NavBlock());
+        $this->display_navigation();
         $page->add_block(new Block("Site Information", $this->build_data_form($yaml)));
         $page->add_block(new Block("System Information", TEXTAREA(
             ["name" => 'data', "style" => "width: 100%; height: 20em;"],

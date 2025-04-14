@@ -4,76 +4,59 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, BR, INPUT, LABEL, OPTION, P, SELECT, SMALL, TABLE, TBODY, TD, TFOOT, TH, TR, emptyHTML, joinHTML};
 
-use function MicroHTML\emptyHTML;
-use function MicroHTML\rawHTML;
-use function MicroHTML\TABLE;
-use function MicroHTML\TBODY;
-use function MicroHTML\TFOOT;
-use function MicroHTML\TR;
-use function MicroHTML\TH;
-use function MicroHTML\TD;
-use function MicroHTML\LABEL;
-use function MicroHTML\INPUT;
-use function MicroHTML\SMALL;
-use function MicroHTML\A;
-use function MicroHTML\BR;
-use function MicroHTML\P;
-use function MicroHTML\SELECT;
-use function MicroHTML\OPTION;
+use MicroHTML\HTMLElement;
 
 class UserPageTheme extends Themelet
 {
-    public function display_login_page(Page $page): void
+    public function display_login_page(): void
     {
-        $page->set_title("Login");
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block(
+        Ctx::$page->set_title("Login");
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block(
             "Login There",
-            rawHTML("There should be a login box to the left")
+            emptyHTML("There should be a login box to the left")
         ));
     }
 
     /**
-     * @param array<int, array{name: string|HTMLElement, link: string}> $parts
+     * @param array<int, array{name: string|HTMLElement, link: Url}> $parts
      */
-    public function display_user_links(Page $page, User $user, array $parts): void
+    public function display_user_links(User $user, array $parts): void
     {
         # $page->add_block(new Block("User Links", join(", ", $parts), "main", 10));
     }
 
     /**
-     * @param array<array{link: string, name: string|HTMLElement}> $parts
+     * @param array<array{link: Url, name: string|HTMLElement}> $parts
      */
-    public function display_user_block(Page $page, User $user, array $parts): void
+    public function display_user_block(User $user, array $parts): void
     {
         $html = emptyHTML('Logged in as ', $user->name);
         foreach ($parts as $part) {
             $html->appendChild(BR());
-            $html->appendChild(A(["href" => $part["link"]], $part["name"]));
+            $html->appendChild(A(["href" => (string)$part["link"]], $part["name"]));
         }
-        $b = new Block("User Links", $html, "left", 90);
-        $b->is_content = false;
-        $page->add_block($b);
+        Ctx::$page->add_block(new Block("User Links", $html, "left", 90, is_content: false));
     }
 
-    public function display_signup_page(Page $page): void
+    public function display_signup_page(): void
     {
-        global $config, $user;
-        $tac = $config->get_string(UserAccountsConfig::LOGIN_TAC, "");
+        $tac = Ctx::$config->get(UserAccountsConfig::LOGIN_TAC) ?? "";
 
-        if ($config->get_bool(UserAccountsConfig::LOGIN_TAC_BBCODE)) {
+        if (Ctx::$config->get(UserAccountsConfig::LOGIN_TAC_BBCODE)) {
             $tac = format_text($tac);
         }
 
         $email_required = (
-            $config->get_bool(UserAccountsConfig::USER_EMAIL_REQUIRED) &&
-            !$user->can(Permissions::CREATE_OTHER_USER)
+            Ctx::$config->get(UserAccountsConfig::USER_EMAIL_REQUIRED) &&
+            !Ctx::$user->can(UserAccountsPermission::CREATE_OTHER_USER)
         );
+        $captcha = Captcha::get_html(UserAccountsPermission::SKIP_SIGNUP_CAPTCHA);
 
         $form = SHM_SIMPLE_FORM(
-            "user_admin/create",
+            make_link("user_admin/create"),
             TABLE(
                 ["class" => "form"],
                 TBODY(
@@ -86,16 +69,16 @@ class UserPageTheme extends Themelet
                         TD(INPUT(["type" => 'password', "name" => 'pass1', "required" => true]))
                     ),
                     TR(
-                        TH(rawHTML("Repeat&nbsp;Password")),
+                        TH(\MicroHTML\rawHTML("Repeat&nbsp;Password")),
                         TD(INPUT(["type" => 'password', "name" => 'pass2', "required" => true]))
                     ),
                     TR(
-                        TH($email_required ? "Email" : rawHTML("Email&nbsp;(Optional)")),
+                        TH($email_required ? "Email" : \MicroHTML\rawHTML("Email&nbsp;(Optional)")),
                         TD(INPUT(["type" => 'email', "name" => 'email', "required" => $email_required]))
                     ),
-                    TR(
-                        TD(["colspan" => "2"], rawHTML(captcha_get_html()))
-                    ),
+                    $captcha ? TR(
+                        TD(["colspan" => "2"], $captcha)
+                    ) : null,
                 ),
                 TFOOT(
                     TR(TD(["colspan" => "2"], INPUT(["type" => "submit", "value" => "Create Account"])))
@@ -104,21 +87,19 @@ class UserPageTheme extends Themelet
         );
 
         $html = emptyHTML(
-            $tac ? P(rawHTML($tac)) : null,
+            $tac ? P($tac) : null,
             $form
         );
 
-        $page->set_title("Create Account");
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block("Signup", $html));
+        Ctx::$page->set_title("Create Account");
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block("Signup", $html));
     }
 
     public function display_user_creator(): void
     {
-        global $page;
-
         $form = SHM_SIMPLE_FORM(
-            "user_admin/create_other",
+            make_link("user_admin/create_other"),
             TABLE(
                 ["class" => "form"],
                 TBODY(
@@ -131,15 +112,15 @@ class UserPageTheme extends Themelet
                         TD(INPUT(["type" => 'password', "name" => 'pass1', "required" => true]))
                     ),
                     TR(
-                        TH(rawHTML("Repeat&nbsp;Password")),
+                        TH(\MicroHTML\rawHTML("Repeat&nbsp;Password")),
                         TD(INPUT(["type" => 'password', "name" => 'pass2', "required" => true]))
                     ),
                     TR(
-                        TH(rawHTML("Email")),
+                        TH("Email"),
                         TD(INPUT(["type" => 'email', "name" => 'email']))
                     ),
                     TR(
-                        TD(["colspan" => 2], rawHTML("(Email is optional for admin-created accounts)")),
+                        TD(["colspan" => 2], "(Email is optional for admin-created accounts)"),
                     ),
                 ),
                 TFOOT(
@@ -147,40 +128,45 @@ class UserPageTheme extends Themelet
                 )
             )
         );
-        $page->add_block(new Block("Create User", $form, "main", 75));
+        Ctx::$page->add_block(new Block("Create User", $form, "main", 75));
     }
 
-    public function display_signups_disabled(Page $page): void
+    public function display_signups_disabled(): void
     {
-        $page->set_title("Signups Disabled");
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block(
+        Ctx::$page->set_title("Signups Disabled");
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block(
             "Signups Disabled",
-            rawHTML("The board admin has disabled the ability to create new accounts~")
+            format_text(Ctx::$config->get(UserAccountsConfig::SIGNUP_DISABLED_MESSAGE)),
         ));
     }
 
-    public function display_login_block(Page $page): void
+    public function display_login_block(): void
     {
-        $page->add_block(new Block("Login", $this->create_login_block(), "left", 90));
+        Ctx::$page->add_block(new Block("Login", $this->create_login_block(), "left", 90));
     }
 
     public function create_login_block(): HTMLElement
     {
-        global $config, $user;
+        $captcha = Captcha::get_html(UserAccountsPermission::SKIP_LOGIN_CAPTCHA);
+
         $form = SHM_SIMPLE_FORM(
-            "user_admin/login",
+            make_link("user_admin/login"),
             TABLE(
                 ["style" => "width: 100%", "class" => "form"],
                 TBODY(
                     TR(
                         TH(LABEL(["for" => "user"], "Name")),
-                        TD(INPUT(["id" => "user", "type" => "text", "name" => "user", "autocomplete" => "username"]))
+                        TD(INPUT(["id" => "user", "type" => "text", "name" => "user", "autocomplete" => "username", "required" => true]))
                     ),
                     TR(
                         TH(LABEL(["for" => "pass"], "Password")),
-                        TD(INPUT(["id" => "pass", "type" => "password", "name" => "pass", "autocomplete" => "current-password"]))
-                    )
+                        TD(INPUT(["id" => "pass", "type" => "password", "name" => "pass", "autocomplete" => "current-password", "required" => true]))
+                    ),
+                    $captcha ? TR(
+                        TH(LABEL(["for" => "captcha"], "Captcha")),
+                        TD($captcha)
+                    ) : null
                 ),
                 TFOOT(
                     TR(TD(["colspan" => "2"], INPUT(["type" => "submit", "value" => "Log In"])))
@@ -190,7 +176,7 @@ class UserPageTheme extends Themelet
 
         $html = emptyHTML();
         $html->appendChild($form);
-        if ($config->get_bool(UserAccountsConfig::SIGNUP_ENABLED) && $user->can(Permissions::CREATE_USER)) {
+        if (Ctx::$config->get(UserAccountsConfig::SIGNUP_ENABLED) && Ctx::$user->can(UserAccountsPermission::CREATE_USER)) {
             $html->appendChild(SMALL(A(["href" => make_link("user_admin/create")], "Create Account")));
         }
 
@@ -200,7 +186,7 @@ class UserPageTheme extends Themelet
     /**
      * @param array<string, int> $ips
      */
-    private function _ip_list(string $name, array $ips): HTMLElement
+    protected function _ip_list(string $name, array $ips): HTMLElement
     {
         $td = TD("$name: ");
         $n = 0;
@@ -221,7 +207,7 @@ class UserPageTheme extends Themelet
      * @param array<string, int> $comments
      * @param array<string, int> $events
      */
-    public function display_ip_list(Page $page, array $uploads, array $comments, array $events): void
+    public function display_ip_list(array $uploads, array $comments, array $events): void
     {
         $html = TABLE(
             ["id" => "ip-history"],
@@ -235,34 +221,32 @@ class UserPageTheme extends Themelet
             )
         );
 
-        $page->add_block(new Block("IPs", $html, "main", 70));
+        Ctx::$page->add_block(new Block("IPs", $html, "main", 70));
     }
 
     /**
-     * @param string[] $stats
+     * @param array<HTMLElement|string> $stats
      */
     public function display_user_page(User $duser, array $stats): void
     {
-        global $page;
-        $stats[] = 'User ID: '.$duser->id;
+        $stats[] = emptyHTML('User ID: '.$duser->id);
 
-        $page->set_title("{$duser->name}'s Page");
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block("Stats", rawHTML(join("<br>", $stats)), "main", 10));
+        Ctx::$page->set_title("{$duser->name}'s Page");
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block("Stats", joinHTML(BR(), $stats), "main", 10));
     }
 
 
     public function build_operations(User $duser, UserOperationsBuildingEvent $event): HTMLElement
     {
-        global $config, $user;
         $html = emptyHTML();
 
         // just a fool-admin protection so they dont mess around with anon users.
-        if ($duser->id != $config->get_int('anon_id')) {
-            if ($user->can(Permissions::EDIT_USER_NAME)) {
+        if ($duser->id !== Ctx::$config->get(UserAccountsConfig::ANON_ID)) {
+            if (Ctx::$user->can(UserAccountsPermission::EDIT_USER_NAME)) {
                 $html->appendChild(SHM_USER_FORM(
                     $duser,
-                    "user_admin/change_name",
+                    make_link("user_admin/change_name"),
                     "Change Name",
                     TBODY(TR(
                         TH("New name"),
@@ -274,7 +258,7 @@ class UserPageTheme extends Themelet
 
             $html->appendChild(SHM_USER_FORM(
                 $duser,
-                "user_admin/change_pass",
+                make_link("user_admin/change_pass"),
                 "Change Password",
                 TBODY(
                     TR(
@@ -282,7 +266,7 @@ class UserPageTheme extends Themelet
                         TD(INPUT(["type" => 'password', "name" => 'pass1', "autocomplete" => 'new-password']))
                     ),
                     TR(
-                        TH("Repeat Password"),
+                        TH("Repeat password"),
                         TD(INPUT(["type" => 'password', "name" => 'pass2', "autocomplete" => 'new-password']))
                     ),
                 ),
@@ -291,7 +275,7 @@ class UserPageTheme extends Themelet
 
             $html->appendChild(SHM_USER_FORM(
                 $duser,
-                "user_admin/change_email",
+                make_link("user_admin/change_email"),
                 "Change Email",
                 TBODY(TR(
                     TH("Address"),
@@ -300,26 +284,26 @@ class UserPageTheme extends Themelet
                 "Set"
             ));
 
-            if ($user->can(Permissions::EDIT_USER_CLASS)) {
+            if (Ctx::$user->can(UserAccountsPermission::EDIT_USER_CLASS)) {
                 $select = SELECT(["name" => "class"]);
                 foreach (UserClass::$known_classes as $name => $values) {
                     $select->appendChild(
-                        OPTION(["value" => $name, "selected" => $name == $duser->class->name], ucwords($name))
+                        OPTION(["value" => $name, "selected" => $name === $duser->class->name], ucwords($name))
                     );
                 }
                 $html->appendChild(SHM_USER_FORM(
                     $duser,
-                    "user_admin/change_class",
+                    make_link("user_admin/change_class"),
                     "Change Class",
                     TBODY(TR(TD($select))),
                     "Set"
                 ));
             }
 
-            if ($user->can(Permissions::DELETE_USER)) {
+            if (Ctx::$user->can(UserAccountsPermission::DELETE_USER)) {
                 $html->appendChild(SHM_USER_FORM(
                     $duser,
-                    "user_admin/delete_user",
+                    make_link("user_admin/delete_user"),
                     "Delete User",
                     TBODY(
                         TR(TD(LABEL(INPUT(["type" => 'checkbox', "name" => 'with_images']), "Delete images"))),
@@ -341,74 +325,13 @@ class UserPageTheme extends Themelet
 
     public function get_help_html(): HTMLElement
     {
-        global $user;
-        $output = emptyHTML(P("Search for posts posted by particular individuals."));
-        $output->appendChild(SHM_COMMAND_EXAMPLE(
-            "poster=username",
-            'Returns posts posted by "username".'
-        ));
-        $output->appendChild(SHM_COMMAND_EXAMPLE(
-            "poster_id=123",
-            'Returns posts posted by user 123.'
-        ));
-
-        if ($user->can(Permissions::VIEW_IP)) {
-            $output->appendChild(SHM_COMMAND_EXAMPLE(
-                "poster_ip=127.0.0.1",
-                "Returns posts posted from IP 127.0.0.1."
-            ));
-        }
-        return $output;
-    }
-
-    /**
-     * @param Page $page
-     * @param UserClass[] $classes
-     * @param \ReflectionClassConstant[] $permissions
-     */
-    public function display_user_classes(Page $page, array $classes, array $permissions): void
-    {
-        $table = TABLE(["class" => "zebra"]);
-
-        $row = TR();
-        $row->appendChild(TH("Permission"));
-        foreach ($classes as $class) {
-            $n = $class->name;
-            if ($class->parent) {
-                $n .= " ({$class->parent->name})";
-            }
-            $row->appendChild(TH($n));
-        }
-        $row->appendChild(TH("Description"));
-        $table->appendChild($row);
-
-        foreach ($permissions as $perm) {
-            $row = TR();
-            $row->appendChild(TH($perm->getName()));
-
-            foreach ($classes as $class) {
-                $opacity = array_key_exists($perm->getValue(), $class->abilities) ? 1 : 0.2;
-                if ($class->can($perm->getValue())) {
-                    $cell = TD(["style" => "color: green; opacity: $opacity;"], "✔");
-                } else {
-                    $cell = TD(["style" => "color: red; opacity: $opacity;"], "✘");
-                }
-                $row->appendChild($cell);
-            }
-
-            $doc = $perm->getDocComment();
-            if ($doc) {
-                $doc = preg_replace_ex('/\/\*\*|\n\s*\*\s*|\*\//', '', $doc);
-                $row->appendChild(TD(["style" => "text-align: left;"], $doc));
-            } else {
-                $row->appendChild(TD(""));
-            }
-
-            $table->appendChild($row);
-        }
-
-        $page->set_title("User Classes");
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block("Classes", $table, "main", 10));
+        return emptyHTML(
+            P("Search for posts posted by particular individuals."),
+            SHM_COMMAND_EXAMPLE("poster=username", 'Returns posts posted by "username"'),
+            // SHM_COMMAND_EXAMPLE("poster_id=123", 'Returns posts posted by user 123'),
+            Ctx::$user->can(IPBanPermission::VIEW_IP)
+                ? SHM_COMMAND_EXAMPLE("poster_ip=127.0.0.1", "Returns posts posted from IP 127.0.0.1.")
+                : null
+        );
     }
 }

@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, BR, DIV, HR, INPUT, P, TABLE, TD, TEXTAREA, TR, emptyHTML};
 
-use function MicroHTML\{FORM, INPUT, TABLE, TR, TD, emptyHTML, rawHTML, BR, TEXTAREA, DIV, HR, P, A};
+use MicroHTML\HTMLElement;
 
 class WikiTheme extends Themelet
 {
@@ -16,10 +16,8 @@ class WikiTheme extends Themelet
      * $wiki_page The wiki page, has ->title and ->body
      * $nav_page A wiki page object with navigation, has ->body
      */
-    public function display_page(Page $page, WikiPage $wiki_page, ?WikiPage $nav_page = null): void
+    public function display_page(WikiPage $wiki_page, ?WikiPage $nav_page = null): void
     {
-        global $user;
-
         if (is_null($nav_page)) {
             $nav_page = new WikiPage();
             $nav_page->body = "";
@@ -28,49 +26,73 @@ class WikiTheme extends Themelet
         $body_html = format_text($nav_page->body);
 
         // only the admin can edit the sidebar
-        if ($user->can(Permissions::WIKI_ADMIN)) {
-            $body_html .= "<p>(<a href='".make_link("wiki/wiki:sidebar/edit")."'>Edit</a>)";
+        if (Ctx::$user->can(WikiPermission::ADMIN)) {
+            $link = A(["href" => make_link("wiki/wiki:sidebar/edit")], "Edit");
+            $body_html = emptyHTML(
+                $body_html,
+                P("(", $link, ")")
+            );
         }
 
+        $page = Ctx::$page;
         if (!$wiki_page->exists) {
             $page->set_code(404);
         }
-
         $page->set_title($wiki_page->title);
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block("Wiki Index", rawHTML($body_html), "left", 20));
+        $this->display_navigation();
+        $page->add_block(new Block("Wiki Index", $body_html, "left", 20));
         $page->add_block(new Block($wiki_page->title, $this->create_display_html($wiki_page)));
+    }
+
+    public function display_list_page(?WikiPage $nav_page = null): void
+    {
+        global $database;
+        if (is_null($nav_page)) {
+            $nav_page = new WikiPage();
+            $nav_page->body = "";
+        }
+
+        $body_html = format_text($nav_page->body);
+
+        $query = "SELECT DISTINCT title FROM wiki_pages
+                ORDER BY title ASC";
+        $titles = $database->get_col($query);
+        $html = DIV(["class" => "wiki-all-grid"]);
+        foreach ($titles as $title) {
+            $html->appendChild(A(["href" => make_link("wiki/$title")], $title));
+        }
+        Ctx::$page->set_title("Wiki page list");
+        Ctx::$page->add_block(new Block("Wiki Index", $body_html, "left", 20));
+        Ctx::$page->add_block(new Block("All Wiki Pages", $html));
     }
 
     /**
      * @param array<array{revision: string, date: string}> $history
      */
-
-    public function display_page_history(Page $page, string $title, array $history): void
+    public function display_page_history(string $title, array $history): void
     {
-        $html = "<table class='zebra'>";
+        $html = TABLE(["class" => "zebra"]);
         foreach ($history as $row) {
-            $rev = $row['revision'];
-            $html .= "<tr><td><a href='".make_link("wiki/$title", "revision=$rev")."'>{$rev}</a></td><td>{$row['date']}</td></tr>";
+            $html->appendChild(TR(
+                TD(A(["href" => make_link("wiki/$title", ["revision" => $row['revision']])], $row['revision'])),
+                TD($row['date'])
+            ));
         }
-        $html .= "</table>";
-        $page->set_title($title);
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block($title, rawHTML($html)));
+        Ctx::$page->set_title($title);
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block($title, $html));
     }
 
-    public function display_page_editor(Page $page, WikiPage $wiki_page): void
+    public function display_page_editor(WikiPage $wiki_page): void
     {
-        $page->set_title($wiki_page->title);
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block("Editor", $this->create_edit_html($wiki_page)));
+        Ctx::$page->set_title($wiki_page->title);
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block("Editor", $this->create_edit_html($wiki_page)));
     }
 
     protected function create_edit_html(WikiPage $page): HTMLElement
     {
-        global $user;
-
-        $lock = $user->can(Permissions::WIKI_ADMIN) ?
+        $lock = Ctx::$user->can(WikiPermission::ADMIN) ?
             emptyHTML(
                 BR(),
                 "Lock page: ",
@@ -80,7 +102,7 @@ class WikiTheme extends Themelet
 
         $u_title = url_escape($page->title);
         return SHM_SIMPLE_FORM(
-            "wiki/$u_title/save",
+            make_link("wiki/$u_title/save"),
             INPUT(["type" => "hidden", "name" => "revision", "value" => $page->revision + 1]),
             TEXTAREA(["name" => "body", "style" => "width: 100%", "rows" => 20], $page->body),
             $lock,
@@ -91,16 +113,16 @@ class WikiTheme extends Themelet
 
     protected function format_wiki_page(WikiPage $page): HTMLElement
     {
-        global $database, $config;
+        global $database;
 
         $text = "{body}";
 
         // if this is a tag page, add tag info
         $tag = $database->get_one("SELECT tag FROM tags WHERE tag = :tag", ["tag" => $page->title]);
         if (!is_null($tag)) {
-            $text = $config->get_string(WikiConfig::TAG_PAGE_TEMPLATE);
+            $text = Ctx::$config->get(WikiConfig::TAG_PAGE_TEMPLATE);
 
-            if (Extension::is_enabled(AliasEditorInfo::KEY)) {
+            if (AliasEditorInfo::is_enabled()) {
                 $aliases = $database->get_col("
                     SELECT oldtag
                     FROM aliases
@@ -111,11 +133,11 @@ class WikiTheme extends Themelet
                 if (!empty($aliases)) {
                     $text = str_replace("{aliases}", implode(", ", $aliases), $text);
                 } else {
-                    $text = str_replace("{aliases}", $config->get_string(WikiConfig::EMPTY_TAGINFO), $text);
+                    $text = str_replace("{aliases}", Ctx::$config->get(WikiConfig::EMPTY_TAGINFO), $text);
                 }
             }
 
-            if (Extension::is_enabled(AutoTaggerInfo::KEY)) {
+            if (AutoTaggerInfo::is_enabled()) {
                 $auto_tags = $database->get_one("
                     SELECT additional_tags
                     FROM auto_tag
@@ -125,42 +147,41 @@ class WikiTheme extends Themelet
                 if (!empty($auto_tags)) {
                     $text = str_replace("{autotags}", $auto_tags, $text);
                 } else {
-                    $text = str_replace("{autotags}", $config->get_string(WikiConfig::EMPTY_TAGINFO), $text);
+                    $text = str_replace("{autotags}", Ctx::$config->get(WikiConfig::EMPTY_TAGINFO), $text);
                 }
             }
         }
 
         $text = str_replace("{body}", $page->body, $text);
 
-        return rawHTML(format_text($text));
+        return format_text($text);
     }
 
     protected function create_display_html(WikiPage $page): HTMLElement
     {
-        global $user;
-
         $u_title = url_escape($page->title);
         $owner = $page->get_owner();
 
         $formatted_body = self::format_wiki_page($page);
 
         $edit = TR();
-        if (Wiki::can_edit($user, $page)) {
-            $edit->appendChild(TD(FORM(
-                ["action" => make_link("wiki/$u_title/edit", "revision={$page->revision}")],
+        if (Wiki::can_edit(Ctx::$user, $page)) {
+            $edit->appendChild(TD(SHM_SIMPLE_FORM(
+                make_link("wiki/$u_title/edit"),
+                INPUT(["type" => "hidden", "name" => "revision", "value" => $page->revision]),
                 INPUT(["type" => "submit", "value" => "Edit"])
             )));
         }
-        if ($user->can(Permissions::WIKI_ADMIN)) {
+        if (Ctx::$user->can(WikiPermission::ADMIN)) {
             $edit->appendChild(
                 TD(SHM_SIMPLE_FORM(
-                    "wiki/$u_title/delete_revision",
+                    make_link("wiki/$u_title/delete_revision"),
                     INPUT(["type" => "hidden", "name" => "revision", "value" => $page->revision]),
                     SHM_SUBMIT("Delete")
                 ))
             );
             $edit->appendChild(TD(SHM_SIMPLE_FORM(
-                "wiki/$u_title/delete_all",
+                make_link("wiki/$u_title/delete_all"),
                 SHM_SUBMIT("Delete All")
             )));
         }

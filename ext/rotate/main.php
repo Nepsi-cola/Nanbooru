@@ -11,62 +11,43 @@ use function MicroHTML\{INPUT};
 /**
  * This class is just a wrapper around SCoreException.
  */
-class ImageRotateException extends SCoreException
+final class ImageRotateException extends SCoreException
 {
 }
 
 /**
  *	This class handles image rotate requests.
  */
-class RotateImage extends Extension
+final class RotateImage extends Extension
 {
+    public const KEY = "rotate";
     public const SUPPORTED_MIME = [MimeType::JPEG, MimeType::PNG, MimeType::GIF, MimeType::WEBP];
-
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_bool('rotate_enabled', true);
-        $config->set_default_int('rotate_default_deg', 180);
-    }
 
     public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
     {
-        global $user, $config;
-        if ($user->can(Permissions::EDIT_FILES) && $config->get_bool("rotate_enabled")
+        if (Ctx::$user->can(ImagePermission::EDIT_FILES)
                 && MimeType::matches_array($event->image->get_mime(), self::SUPPORTED_MIME)) {
             /* Add a link to rotate the image */
             $event->add_part(SHM_SIMPLE_FORM(
-                'rotate/'.$event->image->id,
+                make_link('rotate/'.$event->image->id),
                 INPUT(["type" => 'number', "name" => 'rotate_deg', "id" => "rotate_deg", "placeholder" => "Rotation degrees"]),
                 INPUT(["type" => 'submit', "value" => 'Rotate', "id" => "rotatebutton"]),
             ));
         }
     }
 
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Image Rotate");
-        $sb->add_bool_option("rotate_enabled", "Allow rotating images: ");
-        $sb->add_label("<br>Default Orientation: ");
-        $sb->add_int_option("rotate_default_deg");
-        $sb->add_label(" deg");
-    }
-
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
-
-        if ($event->page_matches("rotate/{image_id}", method: "POST", permission: Permissions::EDIT_FILES)) {
+        if ($event->page_matches("rotate/{image_id}", method: "POST", permission: ImagePermission::EDIT_FILES)) {
             // Try to get the image ID
             $image_id = $event->get_iarg('image_id');
-            $image = Image::by_id_ex($image_id);
+            Image::by_id_ex($image_id);
             /* Check if options were given to rotate an image. */
-            $deg = int_escape($event->req_POST('rotate_deg'));
+            $deg = int_escape($event->POST->req('rotate_deg'));
 
             /* Attempt to rotate the image */
             $this->rotate_image($image_id, $deg);
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link("post/view/".$image_id));
+            Ctx::$page->set_redirect(make_link("post/view/".$image_id));
         }
     }
 
@@ -82,12 +63,12 @@ class RotateImage extends Extension
         $image_obj = Image::by_id_ex($image_id);
         $hash = $image_obj->hash;
 
-        $image_filename  = warehouse_path(Image::IMAGE_DIR, $hash);
-        if (file_exists($image_filename) === false) {
-            throw new ImageRotateException("$image_filename does not exist.");
+        $image_filename  = Filesystem::warehouse_path(Image::IMAGE_DIR, $hash);
+        if (!$image_filename->exists()) {
+            throw new ImageRotateException("{$image_filename->str()} does not exist.");
         }
 
-        $info = \Safe\getimagesize($image_filename);
+        $info = \Safe\getimagesize($image_filename->str());
         assert(!is_null($info));
 
         $memory_use = Media::calc_memory_use($info);
@@ -99,9 +80,9 @@ class RotateImage extends Extension
 
 
         /* Attempt to load the image */
-        $image = imagecreatefromstring(\Safe\file_get_contents($image_filename));
-        if ($image == false) {
-            throw new ImageRotateException("Could not load image: ".$image_filename);
+        $image = imagecreatefromstring(data: $image_filename->get_contents());
+        if ($image === false) {
+            throw new ImageRotateException("Could not load image: ".$image_filename->str());
         }
 
         $background_color = 0;
@@ -122,44 +103,27 @@ class RotateImage extends Extension
 
         /* Temp storage while we rotate */
         $tmp_filename = shm_tempnam('rotate');
-        if (empty($tmp_filename)) {
-            throw new ImageRotateException("Unable to save temporary image file.");
-        }
 
         /* Output to the same format as the original image */
-        switch ($info[2]) {
-            case IMAGETYPE_GIF:
-                $result = imagegif($image_rotated, $tmp_filename);
-                break;
-            case IMAGETYPE_JPEG:
-                $result = imagejpeg($image_rotated, $tmp_filename);
-                break;
-            case IMAGETYPE_PNG:
-                $result = imagepng($image_rotated, $tmp_filename, 9);
-                break;
-            case IMAGETYPE_WEBP:
-                $result = imagewebp($image_rotated, $tmp_filename);
-                break;
-            case IMAGETYPE_BMP:
-                $result = imagebmp($image_rotated, $tmp_filename, true);
-                break;
-            default:
-                throw new ImageRotateException("Unsupported image type.");
-        }
+        $result = match ($info[2]) {
+            IMAGETYPE_GIF => imagegif($image_rotated, $tmp_filename->str()),
+            IMAGETYPE_JPEG => imagejpeg($image_rotated, $tmp_filename->str()),
+            IMAGETYPE_PNG => imagepng($image_rotated, $tmp_filename->str(), 9),
+            IMAGETYPE_WEBP => imagewebp($image_rotated, $tmp_filename->str()),
+            IMAGETYPE_BMP => imagebmp($image_rotated, $tmp_filename->str(), true),
+            default => throw new ImageRotateException("Unsupported image type."),
+        };
 
         if ($result === false) {
-            throw new ImageRotateException("Could not save image: ".$tmp_filename);
+            throw new ImageRotateException("Could not save image: ".$tmp_filename->str());
         }
 
-        $new_hash = \Safe\md5_file($tmp_filename);
+        $new_hash = $tmp_filename->md5();
         /* Move the new image into the main storage location */
-        $target = warehouse_path(Image::IMAGE_DIR, $new_hash);
-        if (!@copy($tmp_filename, $target)) {
-            throw new ImageRotateException("Failed to copy new image file from temporary location ({$tmp_filename}) to archive ($target)");
-        }
-
+        $target = Filesystem::warehouse_path(Image::IMAGE_DIR, $new_hash);
+        $tmp_filename->copy($target);
         send_event(new ImageReplaceEvent($image_obj, $tmp_filename));
 
-        log_info("rotate", "Rotated >>{$image_id} - New hash: {$new_hash}");
+        Log::info("rotate", "Rotated >>{$image_id} - New hash: {$new_hash}");
     }
 }

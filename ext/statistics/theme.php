@@ -4,19 +4,15 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use function MicroHTML\{A, B, DIV, SPAN, emptyHTML};
+
 use MicroHTML\HTMLElement;
 
-use function MicroHTML\{TABLE,THEAD,TBODY,TR,TH,TD};
-use function MicroHTML\A;
-use function MicroHTML\B;
-use function MicroHTML\P;
-use function MicroHTML\DIV;
-use function MicroHTML\emptyHTML;
-use function MicroHTML\rawHTML;
+use function MicroHTML\{TABLE, TBODY, TD, TH, THEAD, TR};
 
 class StatisticsTheme extends Themelet
 {
-    public function display_page(Page $page, int $limit, ?HTMLElement $tag_table, ?HTMLElement $upload_table, ?HTMLElement $comment_table, ?HTMLElement $favorite_table): void
+    public function display_page(int $limit, ?HTMLElement $tag_table, ?HTMLElement $upload_table, ?HTMLElement $comment_table, ?HTMLElement $favorite_table): void
     {
         $html = emptyHTML(
             $tag_table,
@@ -25,13 +21,13 @@ class StatisticsTheme extends Themelet
             $favorite_table,
         );
 
-        $page->set_title("Stats - Top $limit");
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block("Stats", $html, "main", 20));
+        Ctx::$page->set_title("Stats - Top $limit");
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block("Stats", $html, "main", 20));
     }
 
     /**
-     * @param array<string, int|string> $data
+     * @param array<string, int|HTMLElement> $data
      */
     public function build_table(array $data, string $id, string $title, ?int $limit = 10): HTMLElement
     {
@@ -41,8 +37,8 @@ class StatisticsTheme extends Themelet
             $rows->appendChild(
                 TR(
                     TD([], $n),
-                    TD([], rawHTML((string)$value)),
-                    TD([], rawHTML('<a class="username" href="'.make_link('user/'.$user).'">'.$user.'</a>'))
+                    TD([], $value),
+                    TD([], A(["class" => "username", "href" => make_link('user/'.$user)], $user)),
                 )
             );
             $n++;
@@ -53,23 +49,23 @@ class StatisticsTheme extends Themelet
         $table = TABLE(
             ["class" => "zebra stats-table"],
             THEAD(
-                TR(
-                    TH(
-                        ["colspan" => 3],
-                        B($title)
-                    )
-                ),
-                TR(
-                    TH([], "Place"),
-                    TH([], "Amount"),
-                    TH([], "User")
-                )
+                TR(TH(["colspan" => 3], B($title))),
+                TR(TH([], "Place"), TH([], "Amount"), TH([], "User"))
             ),
             TBODY($rows)
         );
         return DIV(
             ["id" => "table$id", "class" => "stats-container"],
             $table
+        );
+    }
+
+    public function build_tag_field(int $tally, int $diff): HTMLElement
+    {
+        return emptyHTML(
+            SPAN(["title" => "Tags changed (ignoring aliases) edits"], $diff),
+            " ",
+            SPAN(["class" => "tag_count", "title" => "Total edits"], $tally)
         );
     }
 }

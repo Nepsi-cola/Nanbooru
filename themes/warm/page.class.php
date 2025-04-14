@@ -4,19 +4,17 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, ARTICLE, BODY, DIV, FOOTER, H1, HEADER, NAV, SMALL, TD};
 
-use function MicroHTML\{BODY, A, TABLE, TR, TD, SMALL, rawHTML, emptyHTML, DIV, ARTICLE, FOOTER, HEADER, H1, NAV};
+use MicroHTML\HTMLElement;
 
 class WarmPage extends Page
 {
     protected function body_html(): HTMLElement
     {
-        global $config;
-
-        $site_name = $config->get_string(SetupConfig::TITLE);
-        $data_href = get_base_href();
-        $main_page = $config->get_string(SetupConfig::MAIN_PAGE);
+        $site_name = Ctx::$config->get(SetupConfig::TITLE);
+        $data_href = Url::base();
+        $main_page = Ctx::$config->get(SetupConfig::MAIN_PAGE);
 
         $left_block_html = [];
         $main_block_html = [];

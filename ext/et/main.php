@@ -5,18 +5,18 @@ declare(strict_types=1);
 namespace Shimmie2;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\{InputInterface,InputArgument};
+use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
-class ET extends Extension
+final class ET extends Extension
 {
+    public const KEY = "et";
     /** @var ETTheme */
     protected Themelet $theme;
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $user;
-        if ($event->page_matches("system_info", permission: Permissions::VIEW_SYSINFO)) {
+        if ($event->page_matches("system_info", permission: ETPermission::VIEW_SYSINFO)) {
             $this->theme->display_info_page(
                 $this->to_yaml($this->get_site_info()),
                 $this->to_yaml($this->get_system_info()),
@@ -26,18 +26,16 @@ class ET extends Extension
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        global $user;
         if ($event->parent === "system") {
-            if ($user->can(Permissions::VIEW_SYSINFO)) {
-                $event->add_nav_link("system_info", new Link('system_info'), "System Info", null, 10);
+            if (Ctx::$user->can(ETPermission::VIEW_SYSINFO)) {
+                $event->add_nav_link(make_link('system_info'), "System Info", order: 10);
             }
         }
     }
 
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::VIEW_SYSINFO)) {
+        if (Ctx::$user->can(ETPermission::VIEW_SYSINFO)) {
             $event->add_link("System Info", make_link("system_info"), 99);
         }
     }
@@ -57,38 +55,32 @@ class ET extends Extension
      */
     private function get_site_info(): array
     {
-        global $config, $database;
+        $config = Ctx::$config;
+        $database = Ctx::$database;
 
-        $core_exts = ExtensionInfo::get_core_extensions();
+        $core_exts = [];
         $extra_exts = [];
-        foreach (ExtensionInfo::get_all() as $info) {
-            if ($info->is_enabled() && !in_array($info->key, $core_exts)) {
-                $extra_exts[] = $info->key;
+        foreach (ExtensionInfo::get_all() as $key => $info) {
+            if ($info::is_enabled()) {
+                if ($info->core) {
+                    $core_exts[] = $info::KEY;
+                } else {
+                    $extra_exts[] = $info::KEY;
+                }
             }
-        }
-
-        $ver = VERSION;
-        if (defined("BUILD_TIME")) {
-            $ver .= "-" . substr(str_replace("-", "", constant("BUILD_TIME")), 0, 8);
-        }
-        if (defined("BUILD_HASH")) {
-            $ver .= "-" . substr(constant("BUILD_HASH"), 0, 7);
-        }
-        if (file_exists(".git")) {
-            $ver .= "+";
         }
 
         $disk_total = \Safe\disk_total_space("./");
         $disk_free = \Safe\disk_free_space("./");
         $info = [
             "about" => [
-                'title' => $config->get_string(SetupConfig::TITLE),
-                'theme' => $config->get_string(SetupConfig::THEME),
-                'url'   => make_http(make_link("/")),
+                'title' => $config->get(SetupConfig::TITLE),
+                'theme' => $config->get(SetupConfig::THEME),
+                'url'   => (string)(make_link("")->asAbsolute()),
             ],
             "versions" => [
-                'shimmie' => $ver,
-                'schema'  => $config->get_int("db_version"),
+                'shimmie' => SysConfig::getVersion(),
+                'schema'  => $config->get("db_version"),
                 'php'     => phpversion(),
                 'db'      => $database->get_driver_id()->value . " " . $database->get_version(),
                 'os'      => php_uname(),
@@ -97,7 +89,7 @@ class ET extends Extension
             "extensions" => [
                 "core" => $core_exts,
                 "extra" => $extra_exts,
-                "handled_mimes" => DataHandlerExtension::get_all_supported_mimes(),
+                "handled_mimes" => array_map(fn ($mime) => (string)$mime, DataHandlerExtension::get_all_supported_mimes()),
             ],
             "stats" => [
                 'images'   => (int)$database->get_one("SELECT COUNT(*) FROM images"),
@@ -105,26 +97,29 @@ class ET extends Extension
                 'users'    => (int)$database->get_one("SELECT COUNT(*) FROM users"),
             ],
             "media" => [
-                "memory_limit" => to_shorthand_int($config->get_int(MediaConfig::MEM_LIMIT)),
+                "memory_limit" => to_shorthand_int($config->get(MediaConfig::MEM_LIMIT)),
                 "disk_use" => to_shorthand_int($disk_total - $disk_free),
                 "disk_total" => to_shorthand_int($disk_total),
             ],
             "thumbnails" => [
-                "engine" => $config->get_string(ImageConfig::THUMB_ENGINE),
-                "quality" => $config->get_int(ImageConfig::THUMB_QUALITY),
-                "width" => $config->get_int(ImageConfig::THUMB_WIDTH),
-                "height" => $config->get_int(ImageConfig::THUMB_HEIGHT),
-                "scaling" => $config->get_int(ImageConfig::THUMB_SCALING),
-                "mime" => $config->get_string(ImageConfig::THUMB_MIME),
+                "engine" => $config->get(ThumbnailConfig::ENGINE),
+                "quality" => $config->get(ThumbnailConfig::QUALITY),
+                "width" => $config->get(ThumbnailConfig::WIDTH),
+                "height" => $config->get(ThumbnailConfig::HEIGHT),
+                "scaling" => $config->get(ThumbnailConfig::SCALING),
+                "mime" => $config->get(ThumbnailConfig::MIME),
             ],
         ];
 
         if (file_exists(".git")) {
             try {
-                $commitHash = trim(\Safe\exec('git log --pretty="%h" -n1 HEAD'));
-                $commitBranch = trim(\Safe\exec('git rev-parse --abbrev-ref HEAD'));
-                $commitOrigin = trim(\Safe\exec('git config --get remote.origin.url'));
-                $commitOrigin = preg_replace_ex("#//.*@#", "//xxx@", $commitOrigin);
+                $commitHash = trim(\Safe\exec('git log --pretty="%h" -n1 HEAD', result_code: $r1));
+                $commitBranch = trim(\Safe\exec('git rev-parse --abbrev-ref HEAD', result_code: $r2));
+                $commitOrigin = trim(\Safe\exec('git config --get remote.origin.url', result_code: $r3));
+                if ($r1 !== 0 || $r2 !== 0 || $r3 !== 0) {
+                    throw new \Exception("Failed to get git data");
+                }
+                $commitOrigin = \Safe\preg_replace("#//.*@#", "//xxx@", $commitOrigin);
                 $info['versions']['shimmie'] .= $commitHash;
                 $info['versions']['origin'] = "$commitOrigin ($commitBranch)";
                 $info['git'] = [
@@ -145,8 +140,6 @@ class ET extends Extension
      */
     private function get_system_info(): array
     {
-        global $config, $database;
-
         $info = [
             "server" => $_SERVER,
             "env" => $_ENV,

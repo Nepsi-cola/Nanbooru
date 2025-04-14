@@ -4,22 +4,13 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use MicroCRUD\{ActionColumn, Column, Table, TextColumn};
+
+use function MicroHTML\{A, BR, INPUT, OPTION, SELECT, SPAN, emptyHTML};
+
 use MicroHTML\HTMLElement;
-use MicroCRUD\ActionColumn;
-use MicroCRUD\Column;
-use MicroCRUD\TextColumn;
-use MicroCRUD\Table;
 
-use function MicroHTML\A;
-use function MicroHTML\SPAN;
-use function MicroHTML\emptyHTML;
-use function MicroHTML\INPUT;
-use function MicroHTML\BR;
-use function MicroHTML\SELECT;
-use function MicroHTML\OPTION;
-use function MicroHTML\rawHTML;
-
-class ActorColumn extends Column
+final class ActorColumn extends Column
 {
     public function __construct(string $name, string $title)
     {
@@ -31,7 +22,7 @@ class ActorColumn extends Column
     {
         $driver = $this->table->db->getAttribute(\PDO::ATTR_DRIVER_NAME);
         switch ($driver) {
-            case "pgsql":
+            case DatabaseDriverID::PGSQL:
                 return "((LOWER(username) = LOWER(:{$this->name}_0)) OR (address && cast(:{$this->name}_1 as inet)))";
             default:
                 return "((username = :{$this->name}_0) OR (address = :{$this->name}_1))";
@@ -79,7 +70,7 @@ class ActorColumn extends Column
     public function display(array $row): HTMLElement
     {
         $ret = emptyHTML();
-        if ($row['username'] != "Anonymous") {
+        if ($row['username'] !== "Anonymous") {
             $ret->appendChild(A(["href" => make_link("user/{$row['username']}"), "title" => $row['address']], $row['username']));
             $ret->appendChild(BR());
         }
@@ -88,7 +79,7 @@ class ActorColumn extends Column
     }
 }
 
-class MessageColumn extends Column
+final class MessageColumn extends Column
 {
     public function __construct(string $name, string $title)
     {
@@ -100,7 +91,7 @@ class MessageColumn extends Column
     {
         $driver = $this->table->db->getAttribute(\PDO::ATTR_DRIVER_NAME);
         switch ($driver) {
-            case "pgsql":
+            case DatabaseDriverID::PGSQL:
                 return "(LOWER({$this->name}) LIKE LOWER(:{$this->name}_0) AND priority >= :{$this->name}_1)";
             default:
                 return "({$this->name} LIKE :{$this->name}_0 AND priority >= :{$this->name}_1)";
@@ -118,18 +109,11 @@ class MessageColumn extends Column
             ])
         );
 
-        $options = [
-            "Debug" => SCORE_LOG_DEBUG,
-            "Info" => SCORE_LOG_INFO,
-            "Warning" => SCORE_LOG_WARNING,
-            "Error" => SCORE_LOG_ERROR,
-            "Critical" => SCORE_LOG_CRITICAL,
-        ];
         $s = SELECT(["name" => "r_{$this->name}[]"]);
         $s->appendChild(OPTION(["value" => ""], '-'));
-        foreach ($options as $k => $v) {
+        foreach (LogLevel::names_to_levels() as $k => $v) {
             $attrs = ["value" => $v];
-            if ($v == @$inputs["r_{$this->name}"][1]) {
+            if ((string)$v === @$inputs["r_{$this->name}"][1]) {
                 $attrs["selected"] = true;
             }
             $s->appendChild(OPTION($attrs, $k));
@@ -155,49 +139,39 @@ class MessageColumn extends Column
 
     public function display(array $row): HTMLElement
     {
-        $c = "#000";
-        switch ($row['priority']) {
-            case SCORE_LOG_DEBUG:
-                $c = "#999";
-                break;
-            case SCORE_LOG_INFO:
-                $c = "#000";
-                break;
-            case SCORE_LOG_WARNING:
-                $c = "#800";
-                break;
-            case SCORE_LOG_ERROR:
-                $c = "#C00";
-                break;
-            case SCORE_LOG_CRITICAL:
-                $c = "#F00";
-                break;
-        }
-        return SPAN(["style" => "color: $c"], rawHTML($this->scan_entities($row[$this->name])));
+        $c = match ($row['priority']) {
+            LogLevel::DEBUG->value => "#999",
+            LogLevel::INFO->value => "#000",
+            LogLevel::WARNING->value => "#800",
+            LogLevel::ERROR->value => "#C00",
+            LogLevel::CRITICAL->value => "#F00",
+            default => "#000",
+        };
+        return SPAN(["style" => "color: $c"], \MicroHTML\rawHTML($this->scan_entities($row[$this->name])));
     }
 
     protected function scan_entities(string $line): string
     {
-        $line = preg_replace_callback("/Image #(\d+)/s", [$this, "link_image"], $line);
-        assert(is_string($line));
-        $line = preg_replace_callback("/Post #(\d+)/s", [$this, "link_image"], $line);
-        assert(is_string($line));
-        $line = preg_replace_callback("/>>(\d+)/s", [$this, "link_image"], $line);
+        $line = preg_replace_callback(
+            "/(Image #|Post #|>>)(\d+)/s",
+            $this->link_image(...),
+            $line
+        );
         assert(is_string($line));
         return $line;
     }
 
     /**
-     * @param array{1: string} $id
+     * @param array<string> $id
      */
     protected function link_image(array $id): string
     {
-        $iid = int_escape($id[1]);
+        $iid = int_escape($id[2]);
         return "<a href='".make_link("post/view/$iid")."'>&gt;&gt;$iid</a>";
     }
 }
 
-class LogTable extends Table
+final class LogTable extends Table
 {
     public function __construct(\FFSPHP\PDO $db)
     {
@@ -218,19 +192,16 @@ class LogTable extends Table
     }
 }
 
-class LogDatabase extends Extension
+final class LogDatabase extends Extension
 {
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_int("log_db_priority", SCORE_LOG_INFO);
-    }
+    public const KEY = "log_db";
+    public const VERSION_KEY = "ext_log_database_version";
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
-        global $database;
+        $database = Ctx::$database;
 
-        if ($this->get_version("ext_log_database_version") < 1) {
+        if ($this->get_version() < 1) {
             $database->create_table("score_log", "
 				id SCORE_AIPK,
 				date_sent TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -241,70 +212,55 @@ class LogDatabase extends Extension
 				message TEXT NOT NULL
 			");
             //INDEX(section)
-            $this->set_version("ext_log_database_version", 1);
+            $this->set_version(1);
         }
-    }
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Logging (Database)");
-        $sb->add_choice_option("log_db_priority", [
-            LOGGING_LEVEL_NAMES[SCORE_LOG_DEBUG] => SCORE_LOG_DEBUG,
-            LOGGING_LEVEL_NAMES[SCORE_LOG_INFO] => SCORE_LOG_INFO,
-            LOGGING_LEVEL_NAMES[SCORE_LOG_WARNING] => SCORE_LOG_WARNING,
-            LOGGING_LEVEL_NAMES[SCORE_LOG_ERROR] => SCORE_LOG_ERROR,
-            LOGGING_LEVEL_NAMES[SCORE_LOG_CRITICAL] => SCORE_LOG_CRITICAL,
-        ], "Debug Level: ");
     }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $database, $page, $user;
-        if ($event->page_matches("log/view", permission: Permissions::VIEW_EVENTLOG)) {
+        $database = Ctx::$database;
+        $page = Ctx::$page;
+        if ($event->page_matches("log/view", permission: LogDatabasePermission::VIEW_EVENTLOG)) {
             $t = new LogTable($database->raw_db());
-            $t->inputs = $event->GET;
+            $t->inputs = $event->GET->toArray();
             $page->set_title("Event Log");
-            $page->add_block(new NavBlock());
+            $this->theme->display_navigation();
             $page->add_block(new Block(null, emptyHTML($t->table($t->query()), $t->paginator())));
         }
     }
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        global $user;
         if ($event->parent === "system") {
-            if ($user->can(Permissions::VIEW_EVENTLOG)) {
-                $event->add_nav_link("event_log", new Link('log/view'), "Event Log");
+            if (Ctx::$user->can(LogDatabasePermission::VIEW_EVENTLOG)) {
+                $event->add_nav_link(make_link('log/view'), "Event Log");
             }
         }
     }
 
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::VIEW_EVENTLOG)) {
+        if (Ctx::$user->can(LogDatabasePermission::VIEW_EVENTLOG)) {
             $event->add_link("Event Log", make_link("log/view"));
         }
     }
 
     public function onLog(LogEvent $event): void
     {
-        global $config, $database, $user;
-
-        $username = ($user && $user->name) ? $user->name : "null";
+        $username = isset(Ctx::$user) ? Ctx::$user->name : "Anonymous";
 
         // not installed yet...
-        if ($this->get_version("ext_log_database_version") < 1) {
+        if ($this->get_version() < 1) {
             return;
         }
 
-        if ($event->priority >= $config->get_int("log_db_priority")) {
-            $database->execute("
+        if ($event->priority >= Ctx::$config->get(LogDatabaseConfig::LEVEL)) {
+            Ctx::$database->execute("
 				INSERT INTO score_log(date_sent, section, priority, username, address, message)
 				VALUES(now(), :section, :priority, :username, :address, :message)
 			", [
                 "section" => $event->section, "priority" => $event->priority, "username" => $username,
-                "address" => get_real_ip(), "message" => $event->message
+                "address" => Network::get_real_ip(), "message" => $event->message
             ]);
         }
     }

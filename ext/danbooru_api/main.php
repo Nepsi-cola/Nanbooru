@@ -36,25 +36,21 @@ function POST(...$args): HTMLElement
 }
 
 
-class DanbooruApi extends Extension
+final class DanbooruApi extends Extension
 {
+    public const KEY = "danbooru_api";
+
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page;
-
+        $page = Ctx::$page;
         if ($event->page_matches("api/danbooru/add_post") || $event->page_matches("api/danbooru/post/create.xml")) {
             // No XML data is returned from this function
-            $page->set_mode(PageMode::DATA);
-            $page->set_mime(MimeType::TEXT);
+            $page->set_data(MimeType::TEXT, "");
             $this->api_add_post($event);
         } elseif ($event->page_matches("api/danbooru/find_posts") || $event->page_matches("api/danbooru/post/index.xml")) {
-            $page->set_mode(PageMode::DATA);
-            $page->set_mime(MimeType::XML_APPLICATION);
-            $page->set_data((string)$this->api_find_posts($event));
+            $page->set_data(MimeType::XML_APPLICATION, (string)$this->api_find_posts($event));
         } elseif ($event->page_matches("api/danbooru/find_tags")) {
-            $page->set_mode(PageMode::DATA);
-            $page->set_mime(MimeType::XML_APPLICATION);
-            $page->set_data((string)$this->api_find_tags($event));
+            $page->set_data(MimeType::XML_APPLICATION, (string)$this->api_find_tags($event));
         }
 
         // Hackery for danbooruup 0.3.2 providing the wrong view url. This simply redirects to the proper
@@ -63,7 +59,6 @@ class DanbooruApi extends Extension
         // This redirects that to https://shimmie/post/view/123
         elseif ($event->page_matches("api/danbooru/post/show/{id}")) {
             $fixedlocation = make_link("post/view/" . $event->get_iarg('id'));
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect($fixedlocation);
         }
     }
@@ -75,19 +70,17 @@ class DanbooruApi extends Extension
      */
     private function authenticate_user(PageRequestEvent $event): void
     {
-        global $config, $user;
-
-        if ($event->get_POST('login') && $event->get_POST('password')) {
+        if ($event->POST->get('login') && $event->POST->get('password')) {
             // Get this user from the db, if it fails the user becomes anonymous
             // Code borrowed from /ext/user
             try {
-                $name = $event->req_POST('login');
-                $pass = $event->req_POST('password');
-                $user = User::by_name_and_pass($name, $pass);
+                $name = $event->POST->req('login');
+                $pass = $event->POST->req('password');
+                Ctx::$user = User::by_name_and_pass($name, $pass);
             } catch (UserNotFound $e) {
-                $user = User::by_id($config->get_int("anon_id", 0));
+                Ctx::$user = User::get_anonymous();
             }
-            send_event(new UserLoginEvent($user));
+            send_event(new UserLoginEvent(Ctx::$user));
         }
     }
 
@@ -104,11 +97,11 @@ class DanbooruApi extends Extension
     private function api_find_tags(PageRequestEvent $event): HTMLElement
     {
         global $database;
-        $GET = only_strings($event->GET);
+        $params = $event->GET;
 
         $results = [];
-        if (isset($GET['id'])) {
-            $idlist = explode(",", $GET['id']);
+        if (isset($params['id'])) {
+            $idlist = explode(",", $params['id']);
             foreach ($idlist as $id) {
                 $sqlresult = $database->get_all(
                     "SELECT id,tag,count FROM tags WHERE id = :id",
@@ -118,8 +111,8 @@ class DanbooruApi extends Extension
                     $results[] = [$row['count'], $row['tag'], $row['id']];
                 }
             }
-        } elseif (isset($GET['name'])) {
-            $namelist = explode(",", $GET['name']);
+        } elseif (isset($params['name'])) {
+            $namelist = explode(",", $params['name']);
             foreach ($namelist as $name) {
                 $sqlresult = $database->get_all(
                     "SELECT id,tag,count FROM tags WHERE LOWER(tag) = LOWER(:tag)",
@@ -132,13 +125,13 @@ class DanbooruApi extends Extension
         }
         // Currently disabled to maintain identical functionality to danbooru 1.0's own "broken" find_tags
         /*
-        elseif (isset($GET['tags'])) {
-            $start = isset($GET['after_id']) ? int_escape($GET['offset']) : 0;
-            $tags = Tag::explode($GET['tags']);
+        elseif (isset($params['tags'])) {
+            $start = isset($params['after_id']) ? int_escape($params['offset']) : 0;
+            $tags = Tag::explode($params['tags']);
             assert(!is_null($start) && !is_null($tags));
         }
         */ else {
-            $start = isset($GET['after_id']) ? int_escape($GET['offset']) : 0;
+            $start = isset($params['after_id']) ? int_escape($params['offset']) : 0;
             $sqlresult = $database->get_all(
                 "SELECT id,tag,count FROM tags WHERE count > 0 AND id >= :id ORDER BY id DESC",
                 ['id' => $start]
@@ -175,37 +168,38 @@ class DanbooruApi extends Extension
      */
     private function api_find_posts(PageRequestEvent $event): HTMLElement
     {
-        $GET = only_strings($event->GET);
+        $params = $event->GET;
         $results = [];
 
         $this->authenticate_user($event);
         $start = 0;
 
-        if (isset($GET['md5'])) {
-            $md5list = explode(",", $GET['md5']);
+        if (isset($params['md5'])) {
+            $md5list = explode(",", $params['md5']);
             foreach ($md5list as $md5) {
+                assert($md5 !== '');
                 $results[] = Image::by_hash($md5);
             }
             $count = count($results);
-        } elseif (isset($GET['id'])) {
-            $idlist = explode(",", $GET['id']);
+        } elseif (isset($params['id'])) {
+            $idlist = explode(",", $params['id']);
             foreach ($idlist as $id) {
                 $results[] = Image::by_id(int_escape($id));
             }
             $count = count($results);
         } else {
-            $limit = isset($GET['limit']) ? int_escape($GET['limit']) : 100;
+            $limit = isset($params['limit']) ? int_escape($params['limit']) : 100;
 
             // Calculate start offset.
-            if (isset($GET['page'])) { // Danbooru API uses 'page' >= 1
-                $start = (int_escape($GET['page']) - 1) * $limit;
-            } elseif (isset($GET['pid'])) { // Gelbooru API uses 'pid' >= 0
-                $start = int_escape($GET['pid']) * $limit;
+            if (isset($params['page'])) { // Danbooru API uses 'page' >= 1
+                $start = (int_escape($params['page']) - 1) * $limit;
+            } elseif (isset($params['pid'])) { // Gelbooru API uses 'pid' >= 0
+                $start = int_escape($params['pid']) * $limit;
             } else {
                 $start = 0;
             }
 
-            $tags = isset($GET['tags']) ? Tag::explode($GET['tags']) : [];
+            $tags = isset($params['tags']) ? Tag::explode($params['tags']) : [];
             // danbooru API clients often set tags=*
             $tags = array_filter($tags, static function ($element) {
                 return $element !== "*";
@@ -226,7 +220,7 @@ class DanbooruApi extends Extension
             }
             $taglist = $img->get_tag_list();
             $owner = $img->get_owner();
-            $previewsize = get_thumbnail_size($img->width, $img->height);
+            $previewsize = $img->get_thumb_size();
             $xml->appendChild(TAG([
                 "id" => $img->id,
                 "md5" => $img->hash,
@@ -278,7 +272,8 @@ class DanbooruApi extends Extension
      */
     private function api_add_post(PageRequestEvent $event): void
     {
-        global $database, $user, $page;
+        global $database;
+        $page = Ctx::$page;
 
         // Check first if a login was supplied, if it wasn't check if the user is logged in via cookie
         // If all that fails, it's an anonymous upload
@@ -286,15 +281,15 @@ class DanbooruApi extends Extension
         // Now we check if a file was uploaded or a url was provided to transload
         // Much of this code is borrowed from /ext/upload
 
-        if (!$user->can(Permissions::CREATE_IMAGE)) {
+        if (!Ctx::$user->can(ImagePermission::CREATE_IMAGE)) {
             $page->set_code(409);
             $page->add_http_header("X-Danbooru-Errors: authentication error");
             return;
         }
 
         if (isset($_FILES['file'])) {    // A file was POST'd in
-            $file = $_FILES['file']['tmp_name'];
-            $filename = $_FILES['file']['name'];
+            $file = new Path($_FILES['file']['tmp_name']);
+            $filename = $file->basename()->str();
             // If both a file is posted and a source provided, I'm assuming source is the source of the file
             if (isset($_REQUEST['source']) && !empty($_REQUEST['source'])) {
                 $source = $_REQUEST['source'];
@@ -302,8 +297,8 @@ class DanbooruApi extends Extension
                 $source = null;
             }
         } elseif (isset($_FILES['post'])) {
-            $file = $_FILES['post']['tmp_name']['file'];
-            $filename = $_FILES['post']['name']['file'];
+            $file = new Path($_FILES['post']['tmp_name']['file']);
+            $filename = $file->basename()->str();
             if (isset($_REQUEST['post']['source']) && !empty($_REQUEST['post']['source'])) {
                 $source = $_REQUEST['post']['source'];
             } else {
@@ -313,7 +308,7 @@ class DanbooruApi extends Extension
             $source = isset($_REQUEST['source']) ? $_REQUEST['source'] : $_REQUEST['post']['source'];
             $file = shm_tempnam("transload");
             try {
-                fetch_url($source, $file);
+                Network::fetch_url($source, $file);
             } catch (FetchException $e) {
                 $page->set_code(409);
                 $page->add_http_header("X-Danbooru-Errors: $e");
@@ -330,8 +325,8 @@ class DanbooruApi extends Extension
         $posttags = isset($_REQUEST['tags']) ? $_REQUEST['tags'] : $_REQUEST['post']['tags'];
 
         // Was an md5 supplied? Does it match the file hash?
-        $hash = \Safe\md5_file($file);
-        if (isset($_REQUEST['md5']) && strtolower($_REQUEST['md5']) != $hash) {
+        $hash = $file->md5();
+        if (isset($_REQUEST['md5']) && strtolower($_REQUEST['md5']) !== $hash) {
             $page->set_code(409);
             $page->add_http_header("X-Danbooru-Errors: md5 mismatch");
             return;
@@ -344,33 +339,31 @@ class DanbooruApi extends Extension
         if (!is_null($existing)) {
             $page->set_code(409);
             $page->add_http_header("X-Danbooru-Errors: duplicate");
-            $existinglink = make_link("post/view/" . $existing->id);
-            $existinglink = make_http($existinglink);
+            $existinglink = make_link("post/view/" . $existing->id)->asAbsolute();
             $page->add_http_header("X-Danbooru-Location: $existinglink");
             return;
         }
 
-        //log_debug("danbooru_api","========== NEW($filename) =========");
-        //log_debug("danbooru_api", "upload($filename): fileinfo(".var_export($fileinfo,TRUE)."), metadata(".var_export($metadata,TRUE).")...");
+        //Log::debug("danbooru_api","========== NEW($filename) =========");
+        //Log::debug("danbooru_api", "upload($filename): fileinfo(".var_export($fileinfo,TRUE)."), metadata(".var_export($metadata,TRUE).")...");
 
         try {
             $newimg = $database->with_savepoint(function () use ($file, $filename, $posttags, $source) {
                 // Fire off an event which should process the new file and add it to the db
-                $dae = send_event(new DataUploadEvent($file, basename($filename), 0, [
+                $dae = send_event(new DataUploadEvent($file, $filename, 0, new QueryArray([
                     'tags' => $posttags,
                     'source' => $source,
-                ]));
+                ])));
 
-                //log_debug("danbooru_api", "send_event(".var_export($nevent,TRUE).")");
+                //Log::debug("danbooru_api", "send_event(".var_export($nevent,TRUE).")");
                 // If it went ok, grab the id for the newly uploaded image and pass it in the header
                 return $dae->images[0];
             });
 
-            $newid = make_link("post/view/" . $newimg->id);
-            $newid = make_http($newid);
+            $newid = make_link("post/view/" . $newimg->id)->asAbsolute();
 
             // Did we POST or GET this call?
-            if ($_SERVER['REQUEST_METHOD'] == 'POST') {
+            if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $page->add_http_header("X-Danbooru-Location: $newid");
             } else {
                 $page->add_http_header("Location: $newid");

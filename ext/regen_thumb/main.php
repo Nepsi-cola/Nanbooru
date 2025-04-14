@@ -5,81 +5,63 @@ declare(strict_types=1);
 namespace Shimmie2;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\{InputInterface,InputArgument};
+use Symfony\Component\Console\Input\{InputArgument, InputInterface};
 use Symfony\Component\Console\Output\OutputInterface;
 
-class RegenThumb extends Extension
+final class RegenThumb extends Extension
 {
+    public const KEY = "regen_thumb";
     /** @var RegenThumbTheme */
     protected Themelet $theme;
 
     public function regenerate_thumbnail(Image $image, bool $force = true): bool
     {
-        global $cache;
         $event = send_event(new ThumbnailGenerationEvent($image, $force));
-        $cache->delete("thumb-block:{$image->id}");
+        Ctx::$cache->delete("thumb-block:{$image->id}");
         return $event->generated;
     }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
-
-        if ($event->page_matches("regen_thumb/one/{image_id}", method: "POST", permission: Permissions::DELETE_IMAGE)) {
+        if ($event->page_matches("regen_thumb/one/{image_id}", method: "POST", permission: ImagePermission::DELETE_IMAGE)) {
             $image = Image::by_id_ex($event->get_iarg('image_id'));
 
             $this->regenerate_thumbnail($image);
 
-            $this->theme->display_results($page, $image);
+            $this->theme->display_results($image);
         }
-        if ($event->page_matches("regen_thumb/mass", method: "POST", permission: Permissions::DELETE_IMAGE)) {
-            $tags = Tag::explode(strtolower($event->req_POST('tags')), false);
+        if ($event->page_matches("regen_thumb/mass", method: "POST", permission: ImagePermission::DELETE_IMAGE)) {
+            $tags = Tag::explode(strtolower($event->POST->req('tags')), false);
             $images = Search::find_images(limit: 10000, tags: $tags);
 
             foreach ($images as $image) {
                 $this->regenerate_thumbnail($image);
             }
 
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link());
+            Ctx::$page->set_redirect(make_link());
         }
     }
 
     public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::DELETE_IMAGE)) {
+        if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
             $event->add_button("Regenerate Thumbnail", "regen_thumb/one/{$event->image->id}");
         }
     }
 
-    // public function onPostListBuilding(PostListBuildingEvent $event): void
-    // {
-    //     global $user;
-    //     if ($user->can(UserAbilities::DELETE_IMAGE) && !empty($event->search_terms)) {
-    //         $event->add_control($this->theme->mtr_html(Tag::implode($event->search_terms)));
-    //     }
-    // }
-
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
-        global $user;
-
-        if ($user->can(Permissions::DELETE_IMAGE)) {
-            $event->add_action("bulk_regen", "Regen Thumbnails", "", "", $this->theme->bulk_html());
-        }
+        $event->add_action("regen-thumb", "Regen Thumbnails", block: $this->theme->bulk_html(), permission: ImagePermission::DELETE_IMAGE);
     }
 
     public function onBulkAction(BulkActionEvent $event): void
     {
-        global $page, $user;
-
         switch ($event->action) {
-            case "bulk_regen":
-                if ($user->can(Permissions::DELETE_IMAGE)) {
+            case "regen-thumb":
+                if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
                     $force = true;
                     if (isset($event->params["bulk_regen_thumb_missing_only"])
-                        && $event->params["bulk_regen_thumb_missing_only"] == "true") {
+                        && $event->params["bulk_regen_thumb_missing_only"] === "true") {
                         $force = false;
                     }
 
@@ -89,7 +71,7 @@ class RegenThumb extends Extension
                             $total++;
                         }
                     }
-                    $page->flash("Regenerated thumbnails for $total items");
+                    $event->log_action("Regenerated thumbnails for $total items");
                 }
                 break;
         }
@@ -102,12 +84,11 @@ class RegenThumb extends Extension
 
     public function onAdminAction(AdminActionEvent $event): void
     {
-        global $page;
         switch ($event->action) {
             case "regen_thumbs":
                 $event->redirect = true;
                 $force = false;
-                if (isset($event->params["regen_thumb_force"]) && $event->params["regen_thumb_force"] == "true") {
+                if (isset($event->params["regen_thumb_force"]) && $event->params["regen_thumb_force"] === "true") {
                     $force = true;
                 }
                 $limit = 1000;
@@ -124,8 +105,8 @@ class RegenThumb extends Extension
                 $i = 0;
                 foreach ($images as $image) {
                     if (!$force) {
-                        $path = warehouse_path(Image::THUMBNAIL_DIR, $image->hash, false);
-                        if (file_exists($path)) {
+                        $path = Filesystem::warehouse_path(Image::THUMBNAIL_DIR, $image->hash, false);
+                        if ($path->exists()) {
                             continue;
                         }
                     }
@@ -137,30 +118,7 @@ class RegenThumb extends Extension
                         break;
                     }
                 }
-                $page->flash("Re-generated $i thumbnails");
-                break;
-            case "delete_thumbs":
-                $event->redirect = true;
-
-                if (isset($event->params["delete_thumb_mime"]) && $event->params["delete_thumb_mime"] != "") {
-                    $images = Search::find_images(tags: ["mime=" . $event->params["delete_thumb_mime"]]);
-
-                    $i = 0;
-                    foreach ($images as $image) {
-                        $outname = $image->get_thumb_filename();
-                        if (file_exists($outname)) {
-                            unlink($outname);
-                            $i++;
-                        }
-                    }
-                    $page->flash("Deleted $i thumbnails for ".$event->params["delete_thumb_mime"]." images");
-                } else {
-                    $dir = "data/thumbs/";
-                    deltree($dir);
-                    $page->flash("Deleted all thumbnails");
-                }
-
-
+                Ctx::$page->flash("Re-generated $i thumbnails");
                 break;
         }
     }

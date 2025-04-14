@@ -4,29 +4,26 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class OwnerSetEvent extends Event
+final class OwnerSetEvent extends Event
 {
-    public Image $image;
-    public User $owner;
-
-    public function __construct(Image $image, User $owner)
-    {
+    public function __construct(
+        public Image $image,
+        public User $owner
+    ) {
         parent::__construct();
-        $this->image = $image;
-        $this->owner = $owner;
     }
 }
 
-class PostOwner extends Extension
+final class PostOwner extends Extension
 {
+    public const KEY = "post_owner";
     /** @var PostOwnerTheme */
     protected Themelet $theme;
 
     public function onImageInfoSet(ImageInfoSetEvent $event): void
     {
-        global $page, $user;
         $owner = $event->get_param('owner');
-        if ($user->can(Permissions::EDIT_IMAGE_OWNER) && !is_null($owner)) {
+        if (Ctx::$user->can(PostOwnerPermission::EDIT_IMAGE_OWNER) && !is_null($owner)) {
             $owner_ob = User::by_name($owner);
             send_event(new OwnerSetEvent($event->image, $owner_ob));
         }
@@ -34,8 +31,7 @@ class PostOwner extends Extension
 
     public function onOwnerSet(OwnerSetEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::EDIT_IMAGE_OWNER)) {
+        if (Ctx::$user->can(PostOwnerPermission::EDIT_IMAGE_OWNER)) {
             $event->image->set_owner($event->owner);
         }
     }

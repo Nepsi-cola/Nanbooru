@@ -4,53 +4,46 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class AuthorSetEvent extends Event
+final class AuthorSetEvent extends Event
 {
-    public Image $image;
-    public User $user;
-    public string $author;
-
-    public function __construct(Image $image, User $user, string $author)
-    {
+    public function __construct(
+        public Image $image,
+        public User $user,
+        public string $author
+    ) {
         parent::__construct();
-        $this->image = $image;
-        $this->user = $user;
-        $this->author = $author;
     }
 }
 
 /**
  * @phpstan-type ArtistArtist array{id:int,artist_id:int,user_name:string,name:string,notes:string,type:string,posts:int}
- * @phpstan-type ArtistAlias array{id:int,alias_id:int,alias_name:string,alias:string}
+ * @phpstan-type ArtistAlias array{id:int,alias:string}
  * @phpstan-type ArtistMember array{id:int,name:string}
  * @phpstan-type ArtistUrl array{id:int,url:string}
  */
-class Artists extends Extension
+final class Artists extends Extension
 {
+    public const KEY = "artists";
     /** @var ArtistsTheme */
     protected Themelet $theme;
 
     public function onInitExt(InitExtEvent $event): void
     {
-        global $config;
         Image::$prop_types["author"] = ImagePropType::STRING;
-        $config->set_default_int("artistsPerPage", 20);
     }
 
     public function onImageInfoSet(ImageInfoSetEvent $event): void
     {
-        global $user;
         $author = $event->get_param("author");
-        if ($user->can(Permissions::EDIT_IMAGE_ARTIST) && $author) {
-            send_event(new AuthorSetEvent($event->image, $user, $author));
+        if (Ctx::$user->can(ArtistsPermission::EDIT_IMAGE_ARTIST) && $author) {
+            send_event(new AuthorSetEvent($event->image, Ctx::$user, $author));
         }
     }
 
     public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
     {
-        global $user;
         $artistName = $this->get_artistName_by_imageID($event->image->id);
-        if (!$user->is_anonymous()) {
+        if (Ctx::$user->can(ArtistsPermission::EDIT_ARTIST_INFO)) {
             $event->add_part($this->theme->get_author_editor_html($artistName), 42);
         }
     }
@@ -58,8 +51,7 @@ class Artists extends Extension
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^(author|artist)[=|:](.*)$/i")) {
-            $char = $matches[2];
-            $event->add_querylet(new Querylet("author = :author_char", ["author_char" => $char]));
+            $event->add_querylet(new Querylet("author = :author_char", ["author_char" => $matches[2]]));
         }
     }
 
@@ -72,9 +64,9 @@ class Artists extends Extension
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
-        global $config, $database;
+        $database = Ctx::$database;
 
-        if ($this->get_version("ext_artists_version") < 1) {
+        if ($this->get_version() < 1) {
             $database->create_table("artists", "
 					id SCORE_AIPK,
 					user_id INTEGER NOT NULL,
@@ -117,14 +109,12 @@ class Artists extends Extension
 					");
             $database->execute("ALTER TABLE images ADD COLUMN author VARCHAR(255) NULL");
 
-            $this->set_version("ext_artists_version", 1);
+            $this->set_version(1);
         }
     }
 
     public function onAuthorSet(AuthorSetEvent $event): void
     {
-        global $database;
-
         $author = strtolower($event->author);
         if (strlen($author) === 0 || strpos($author, " ")) {
             return;
@@ -156,7 +146,7 @@ class Artists extends Extension
             $artistName = $author;
         }
 
-        $database->execute(
+        Ctx::$database->execute(
             "UPDATE images SET author = :author WHERE id = :id",
             ['author' => $artistName, 'id' => $event->image->id]
         );
@@ -164,27 +154,26 @@ class Artists extends Extension
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
+        $page = Ctx::$page;
+        $user = Ctx::$user;
 
         if ($event->page_matches("artist/list/{page}")) {
             $this->get_listing(page_number($event->get_arg('page')));
             $this->theme->sidebar_options("neutral");
         }
         if ($event->page_matches("artist/new")) {
-            if (!$user->is_anonymous()) {
+            if ($user->can(ArtistsPermission::EDIT_ARTIST_INFO)) {
                 $this->theme->new_artist_composer();
             } else {
                 throw new PermissionDenied("You must be registered and logged in to create a new artist.");
             }
         }
         if ($event->page_matches("artist/new_artist")) {
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/new"));
         }
         if ($event->page_matches("artist/create")) {
-            if (!$user->is_anonymous()) {
+            if ($user->can(ArtistsPermission::EDIT_ARTIST_INFO)) {
                 $newArtistID = $this->add_artist();
-                $page->set_mode(PageMode::REDIRECT);
                 $page->set_redirect(make_link("artist/view/" . $newArtistID));
             } else {
                 throw new PermissionDenied("You must be registered and logged in to create a new artist.");
@@ -197,19 +186,12 @@ class Artists extends Extension
             $members = $this->get_members($artist['id']);
             $urls = $this->get_urls($artist['id']);
 
-            $userIsLogged = !$user->is_anonymous();
-            $userIsAdmin = $user->can(Permissions::ARTISTS_ADMIN);
+            $userIsLogged = $user->can(ArtistsPermission::EDIT_ARTIST_INFO);
+            $userIsAdmin = $user->can(ArtistsPermission::ADMIN);
 
             $images = Search::find_images(limit: 4, tags: Tag::explode($artist['name']));
 
             $this->theme->show_artist($artist, $aliases, $members, $urls, $images, $userIsLogged, $userIsAdmin);
-            /*
-            if ($userIsLogged) {
-                $this->theme->show_new_alias_composer($artistID);
-                $this->theme->show_new_member_composer($artistID);
-                $this->theme->show_new_url_composer($artistID);
-            }
-            */
 
             $this->theme->sidebar_options("editor", $artistID, $userIsAdmin);
         }
@@ -220,60 +202,54 @@ class Artists extends Extension
             $members = $this->get_members($artistID);
             $urls = $this->get_urls($artistID);
 
-            if (!$user->is_anonymous()) {
+            if ($user->can(ArtistsPermission::EDIT_ARTIST_INFO)) {
                 $this->theme->show_artist_editor($artist, $aliases, $members, $urls);
 
-                $userIsAdmin = $user->can(Permissions::ARTISTS_ADMIN);
+                $userIsAdmin = $user->can(ArtistsPermission::ADMIN);
                 $this->theme->sidebar_options("editor", $artistID, $userIsAdmin);
             } else {
                 throw new PermissionDenied("You must be registered and logged in to edit an artist.");
             }
         }
         if ($event->page_matches("artist/edit_artist")) {
-            $artistID = int_escape($event->req_POST('artist_id'));
-            $page->set_mode(PageMode::REDIRECT);
+            $artistID = int_escape($event->POST->req('artist_id'));
             $page->set_redirect(make_link("artist/edit/" . $artistID));
         }
         if ($event->page_matches("artist/edited")) {
-            $artistID = int_escape($event->get_POST('id'));
+            $artistID = int_escape($event->POST->get('id'));
             $this->update_artist();
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/nuke_artist")) {
-            $artistID = int_escape($event->req_POST('artist_id'));
-            $page->set_mode(PageMode::REDIRECT);
+            $artistID = int_escape($event->POST->req('artist_id'));
             $page->set_redirect(make_link("artist/nuke/" . $artistID));
         }
         if ($event->page_matches("artist/nuke/{artistID}")) {
             $artistID = $event->get_iarg('artistID');
             $this->delete_artist($artistID); // this will delete the artist, its alias, its urls and its members
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/list"));
         }
         if ($event->page_matches("artist/add_alias")) {
-            $artistID = int_escape($event->req_POST('artist_id'));
+            $artistID = int_escape($event->POST->req('artist_id'));
             $this->theme->show_new_alias_composer($artistID);
         }
         if ($event->page_matches("artist/add_member")) {
-            $artistID = int_escape($event->req_POST('artist_id'));
+            $artistID = int_escape($event->POST->req('artist_id'));
             $this->theme->show_new_member_composer($artistID);
         }
         if ($event->page_matches("artist/add_url")) {
-            $artistID = int_escape($event->req_POST('artist_id'));
+            $artistID = int_escape($event->POST->req('artist_id'));
             $this->theme->show_new_url_composer($artistID);
         }
         if ($event->page_matches("artist/alias/add")) {
-            $artistID = int_escape($event->req_POST('artist_id'));
+            $artistID = int_escape($event->POST->req('artist_id'));
             $this->add_alias();
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/alias/delete/{aliasID}")) {
             $aliasID = $event->get_iarg('aliasID');
             $artistID = $this->get_artistID_by_aliasID($aliasID);
             $this->delete_alias($aliasID);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/alias/edit/{aliasID}")) {
@@ -283,22 +259,19 @@ class Artists extends Extension
         }
         if ($event->page_matches("artist/alias/edited")) {
             $this->update_alias();
-            $aliasID = int_escape($event->req_POST('aliasID'));
+            $aliasID = int_escape($event->POST->req('aliasID'));
             $artistID = $this->get_artistID_by_aliasID($aliasID);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/url/add")) {
-            $artistID = int_escape($event->req_POST('artist_id'));
+            $artistID = int_escape($event->POST->req('artist_id'));
             $this->add_urls();
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/url/delete/{urlID}")) {
             $urlID = $event->get_iarg('urlID');
             $artistID = $this->get_artistID_by_urlID($urlID);
             $this->delete_url($urlID);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/url/edit/{urlID}")) {
@@ -308,22 +281,19 @@ class Artists extends Extension
         }
         if ($event->page_matches("artist/url/edited")) {
             $this->update_url();
-            $urlID = int_escape($event->req_POST('urlID'));
+            $urlID = int_escape($event->POST->req('urlID'));
             $artistID = $this->get_artistID_by_urlID($urlID);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/member/add")) {
-            $artistID = int_escape($event->req_POST('artist_id'));
+            $artistID = int_escape($event->POST->req('artist_id'));
             $this->add_members();
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/member/delete/{memberID}")) {
             $memberID = $event->get_iarg('memberID');
             $artistID = $this->get_artistID_by_memberID($memberID);
             $this->delete_member($memberID);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
         if ($event->page_matches("artist/member/edit/{memberID}")) {
@@ -333,103 +303,88 @@ class Artists extends Extension
         }
         if ($event->page_matches("artist/member/edited")) {
             $this->update_member();
-            $memberID = int_escape($event->req_POST('memberID'));
+            $memberID = int_escape($event->POST->req('memberID'));
             $artistID = $this->get_artistID_by_memberID($memberID);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("artist/view/" . $artistID));
         }
     }
 
     private function get_artistName_by_imageID(int $imageID): string
     {
-        global $database;
-        $result = $database->get_row("SELECT author FROM images WHERE id = :id", ['id' => $imageID]);
+        $result = Ctx::$database->get_row("SELECT author FROM images WHERE id = :id", ['id' => $imageID]);
         return $result['author'] ?? "";
     }
 
     private function url_exists_by_url(string $url): bool
     {
-        global $database;
-        $result = $database->get_one("SELECT COUNT(1) FROM artist_urls WHERE url = :url", ['url' => $url]);
-        return ($result != 0);
+        $result = Ctx::$database->get_one("SELECT COUNT(1) FROM artist_urls WHERE url = :url", ['url' => $url]);
+        return ($result !== 0);
     }
 
     private function member_exists_by_name(string $member): bool
     {
-        global $database;
-        $result = $database->get_one("SELECT COUNT(1) FROM artist_members WHERE name = :name", ['name' => $member]);
-        return ($result != 0);
+        $result = Ctx::$database->get_one("SELECT COUNT(1) FROM artist_members WHERE name = :name", ['name' => $member]);
+        return ($result !== 0);
     }
 
     private function alias_exists_by_name(string $alias): bool
     {
-        global $database;
-        $result = $database->get_one("SELECT COUNT(1) FROM artist_alias WHERE alias = :alias", ['alias' => $alias]);
-        return ($result != 0);
+        $result = Ctx::$database->get_one("SELECT COUNT(1) FROM artist_alias WHERE alias = :alias", ['alias' => $alias]);
+        return ($result !== 0);
     }
 
     private function alias_exists(int $artistID, string $alias): bool
     {
-        global $database;
-        $result = $database->get_one(
+        $result = Ctx::$database->get_one(
             "SELECT COUNT(1) FROM artist_alias WHERE artist_id = :artist_id AND alias = :alias",
             ['artist_id' => $artistID, 'alias' => $alias]
         );
-        return ($result != 0);
+        return ($result !== 0);
     }
 
     private function get_artistID_by_url(string $url): int
     {
-        global $database;
-        return (int) $database->get_one("SELECT artist_id FROM artist_urls WHERE url = :url", ['url' => $url]);
+        return (int) Ctx::$database->get_one("SELECT artist_id FROM artist_urls WHERE url = :url", ['url' => $url]);
     }
 
     private function get_artistID_by_memberName(string $member): int
     {
-        global $database;
-        return (int) $database->get_one("SELECT artist_id FROM artist_members WHERE name = :name", ['name' => $member]);
+        return (int) Ctx::$database->get_one("SELECT artist_id FROM artist_members WHERE name = :name", ['name' => $member]);
     }
 
     private function get_artistName_by_artistID(int $artistID): string
     {
-        global $database;
-        return (string) $database->get_one("SELECT name FROM artists WHERE id = :id", ['id' => $artistID]);
+        return (string) Ctx::$database->get_one("SELECT name FROM artists WHERE id = :id", ['id' => $artistID]);
     }
 
     private function get_artistID_by_aliasID(int $aliasID): int
     {
-        global $database;
-        return (int) $database->get_one("SELECT artist_id FROM artist_alias WHERE id = :id", ['id' => $aliasID]);
+        return (int) Ctx::$database->get_one("SELECT artist_id FROM artist_alias WHERE id = :id", ['id' => $aliasID]);
     }
 
     private function get_artistID_by_memberID(int $memberID): int
     {
-        global $database;
-        return (int) $database->get_one("SELECT artist_id FROM artist_members WHERE id = :id", ['id' => $memberID]);
+        return (int) Ctx::$database->get_one("SELECT artist_id FROM artist_members WHERE id = :id", ['id' => $memberID]);
     }
 
     private function get_artistID_by_urlID(int $urlID): int
     {
-        global $database;
-        return (int) $database->get_one("SELECT artist_id FROM artist_urls WHERE id = :id", ['id' => $urlID]);
+        return (int) Ctx::$database->get_one("SELECT artist_id FROM artist_urls WHERE id = :id", ['id' => $urlID]);
     }
 
     private function delete_alias(int $aliasID): void
     {
-        global $database;
-        $database->execute("DELETE FROM artist_alias WHERE id = :id", ['id' => $aliasID]);
+        Ctx::$database->execute("DELETE FROM artist_alias WHERE id = :id", ['id' => $aliasID]);
     }
 
     private function delete_url(int $urlID): void
     {
-        global $database;
-        $database->execute("DELETE FROM artist_urls WHERE id = :id", ['id' => $urlID]);
+        Ctx::$database->execute("DELETE FROM artist_urls WHERE id = :id", ['id' => $urlID]);
     }
 
     private function delete_member(int $memberID): void
     {
-        global $database;
-        $database->execute("DELETE FROM artist_members WHERE id = :id", ['id' => $memberID]);
+        Ctx::$database->execute("DELETE FROM artist_members WHERE id = :id", ['id' => $memberID]);
     }
 
     /**
@@ -437,8 +392,9 @@ class Artists extends Extension
      */
     private function get_alias_by_id(int $aliasID): array
     {
-        global $database;
-        return $database->get_row("SELECT * FROM artist_alias WHERE id = :id", ['id' => $aliasID]);
+        /** @var ArtistAlias $row */
+        $row = Ctx::$database->get_row("SELECT * FROM artist_alias WHERE id = :id", ['id' => $aliasID]);
+        return $row;
     }
 
     /**
@@ -446,8 +402,9 @@ class Artists extends Extension
      */
     private function get_url_by_id(int $urlID): array
     {
-        global $database;
-        return $database->get_row("SELECT * FROM artist_urls WHERE id = :id", ['id' => $urlID]);
+        /** @var ArtistUrl $row */
+        $row = Ctx::$database->get_row("SELECT * FROM artist_urls WHERE id = :id", ['id' => $urlID]);
+        return $row;
     }
 
     /**
@@ -455,13 +412,14 @@ class Artists extends Extension
      */
     private function get_member_by_id(int $memberID): array
     {
-        global $database;
-        return $database->get_row("SELECT * FROM artist_members WHERE id = :id", ['id' => $memberID]);
+        /** @var ArtistMember $row */
+        $row = Ctx::$database->get_row("SELECT * FROM artist_members WHERE id = :id", ['id' => $memberID]);
+        return $row;
     }
 
     private function update_artist(): void
     {
-        global $user;
+        $user = Ctx::$user;
         $inputs = validate_input([
             'id' => 'int',
             'name' => 'string,lower',
@@ -488,8 +446,7 @@ class Artists extends Extension
             return;
         }
 
-        global $database;
-        $database->execute(
+        Ctx::$database->execute(
             "UPDATE artists SET name = :name, notes = :notes, updated = now(), user_id = :user_id WHERE id = :id",
             ['name' => $name, 'notes' => $notes, 'user_id' => $userID, 'id' => $artistID]
         );
@@ -560,18 +517,16 @@ class Artists extends Extension
 
     private function update_alias(): void
     {
-        global $user;
         $inputs = validate_input([
             "aliasID" => "int",
             "alias" => "string,lower",
         ]);
-        $this->save_existing_alias($inputs['aliasID'], $inputs['alias'], $user->id);
+        $this->save_existing_alias($inputs['aliasID'], $inputs['alias'], Ctx::$user->id);
     }
 
     private function save_existing_alias(int $aliasID, string $alias, int $userID): void
     {
-        global $database;
-        $database->execute(
+        Ctx::$database->execute(
             "UPDATE artist_alias SET alias = :alias, updated = now(), user_id = :user_id WHERE id = :id",
             ['alias' => $alias, 'user_id' => $userID, 'id' => $aliasID]
         );
@@ -579,18 +534,16 @@ class Artists extends Extension
 
     private function update_url(): void
     {
-        global $user;
         $inputs = validate_input([
             "urlID" => "int",
             "url" => "string",
         ]);
-        $this->save_existing_url($inputs['urlID'], $inputs['url'], $user->id);
+        $this->save_existing_url($inputs['urlID'], $inputs['url'], Ctx::$user->id);
     }
 
     private function save_existing_url(int $urlID, string $url, int $userID): void
     {
-        global $database;
-        $database->execute(
+        Ctx::$database->execute(
             "UPDATE artist_urls SET url = :url, updated = now(), user_id = :user_id WHERE id = :id",
             ['url' => $url, 'user_id' => $userID, 'id' => $urlID]
         );
@@ -598,18 +551,16 @@ class Artists extends Extension
 
     private function update_member(): void
     {
-        global $user;
         $inputs = validate_input([
             "memberID" => "int",
             "name" => "string,lower",
         ]);
-        $this->save_existing_member($inputs['memberID'], $inputs['name'], $user->id);
+        $this->save_existing_member($inputs['memberID'], $inputs['name'], Ctx::$user->id);
     }
 
     private function save_existing_member(int $memberID, string $memberName, int $userID): void
     {
-        global $database;
-        $database->execute(
+        Ctx::$database->execute(
             "UPDATE artist_members SET name = :name, updated = now(), user_id = :user_id WHERE id = :id",
             ['name' => $memberName, 'user_id' => $userID, 'id' => $memberID]
         );
@@ -617,7 +568,6 @@ class Artists extends Extension
 
     private function add_artist(): int
     {
-        global $user;
         $inputs = validate_input([
             "name" => "string,lower",
             "notes" => "string,optional",
@@ -636,14 +586,15 @@ class Artists extends Extension
         $aliases = $inputs["aliases"];
         $members = $inputs["members"];
         $urls = $inputs["urls"];
-        $userID = $user->id;
+        $username = Ctx::$user->name;
+        $userID = Ctx::$user->id;
 
         //$artistID = "";
 
         //// WE CHECK IF THE ARTIST ALREADY EXISTS ON DATABASE; IF NOT WE CREATE
         if (!$this->artist_exists($name)) {
             $artistID = $this->save_new_artist($name, $notes);
-            log_info("artists", "Artist {$artistID} created by {$user->name}");
+            Log::info("artists", "Artist {$artistID} created by {$username}");
         } else {
             $artistID = $this->get_artist_id($name);
         }
@@ -684,22 +635,20 @@ class Artists extends Extension
 
     private function save_new_artist(string $name, string $notes): int
     {
-        global $database, $user;
-        $database->execute("
+        Ctx::$database->execute("
             INSERT INTO artists (user_id, name, notes, created, updated)
             VALUES (:user_id, :name, :notes, now(), now())
-        ", ['user_id' => $user->id, 'name' => $name, 'notes' => $notes]);
-        return $database->get_last_insert_id('artists_id_seq');
+        ", ['user_id' => Ctx::$user->id, 'name' => $name, 'notes' => $notes]);
+        return Ctx::$database->get_last_insert_id('artists_id_seq');
     }
 
     private function artist_exists(string $name): bool
     {
-        global $database;
-        $result = $database->get_one(
+        $result = Ctx::$database->get_one(
             "SELECT COUNT(1) FROM artists WHERE name = :name",
             ['name' => $name]
         );
-        return ($result != 0);
+        return ($result !== 0);
     }
 
     /**
@@ -707,15 +656,11 @@ class Artists extends Extension
      */
     private function get_artist(int $artistID): array
     {
-        global $database;
-        $result = $database->get_row(
+        /** @var ArtistArtist $result */
+        $result = Ctx::$database->get_row(
             "SELECT * FROM artists WHERE id = :id",
             ['id' => $artistID]
         );
-
-        $result["name"] = stripslashes($result["name"]);
-        $result["notes"] = stripslashes($result["notes"]);
-
         return $result;
     }
 
@@ -724,17 +669,11 @@ class Artists extends Extension
      */
     private function get_members(int $artistID): array
     {
-        global $database;
-        $result = $database->get_all(
+        /** @var ArtistMember[] $result */
+        $result = Ctx::$database->get_all(
             "SELECT * FROM artist_members WHERE artist_id = :artist_id",
             ['artist_id' => $artistID]
         );
-
-        $num = count($result);
-        for ($i = 0; $i < $num; $i++) {
-            $result[$i]["name"] = stripslashes($result[$i]["name"]);
-        }
-
         return $result;
     }
 
@@ -743,24 +682,17 @@ class Artists extends Extension
      */
     private function get_urls(int $artistID): array
     {
-        global $database;
-        $result = $database->get_all(
+        /** @var ArtistUrl[] $result */
+        $result = Ctx::$database->get_all(
             "SELECT id, url FROM artist_urls WHERE artist_id = :artist_id",
             ['artist_id' => $artistID]
         );
-
-        $num = count($result);
-        for ($i = 0; $i < $num; $i++) {
-            $result[$i]["url"] = stripslashes($result[$i]["url"]);
-        }
-
         return $result;
     }
 
     private function get_artist_id(string $name): int
     {
-        global $database;
-        return (int) $database->get_one(
+        return (int) Ctx::$database->get_one(
             "SELECT id FROM artists WHERE name = :name",
             ['name' => $name]
         );
@@ -768,9 +700,7 @@ class Artists extends Extension
 
     private function get_artistID_by_aliasName(string $alias): int
     {
-        global $database;
-
-        return (int) $database->get_one(
+        return (int) Ctx::$database->get_one(
             "SELECT artist_id FROM artist_alias WHERE alias = :alias",
             ['alias' => $alias]
         );
@@ -778,8 +708,7 @@ class Artists extends Extension
 
     private function delete_artist(int $artistID): void
     {
-        global $database;
-        $database->execute(
+        Ctx::$database->execute(
             "DELETE FROM artists WHERE id = :id",
             ['id' => $artistID]
         );
@@ -790,11 +719,10 @@ class Artists extends Extension
      */
     private function get_listing(int $pageNumber): void
     {
-        global $config, $database;
+        $artistsPerPage = Ctx::$config->get(ArtistsConfig::ARTISTS_PER_PAGE);
 
-        $artistsPerPage = $config->get_int("artistsPerPage");
-
-        $listing = $database->get_all(
+        /** @var ArtistArtist[] $listing */
+        $listing = Ctx::$database->get_all(
             "
                 (
                     SELECT a.id, a.user_id, a.name, u.name AS user_name, COALESCE(t.count, 0) AS posts
@@ -848,15 +776,7 @@ class Artists extends Extension
             ]
         );
 
-        $number_of_listings = count($listing);
-
-        for ($i = 0; $i < $number_of_listings; $i++) {
-            $listing[$i]["name"] = stripslashes($listing[$i]["name"]);
-            $listing[$i]["user_name"] = stripslashes($listing[$i]["user_name"]);
-            $listing[$i]["artist_name"] = stripslashes($listing[$i]["artist_name"]);
-        }
-
-        $count = $database->get_one("
+        $count = Ctx::$database->get_one("
                 SELECT COUNT(1)
                 FROM artists AS a
                     LEFT OUTER JOIN artist_members AS am
@@ -875,7 +795,6 @@ class Artists extends Extension
      */
     private function add_urls(): void
     {
-        global $user;
         $inputs = validate_input([
             "artistID" => "int",
             "urls" => "string",
@@ -885,16 +804,14 @@ class Artists extends Extension
 
         foreach ($urls as $url) {
             if (!$this->url_exists($artistID, $url)) {
-                $this->save_new_url($artistID, $url, $user->id);
+                $this->save_new_url($artistID, $url, Ctx::$user->id);
             }
         }
     }
 
     private function save_new_url(int $artistID, string $url, int $userID): void
     {
-        global $database;
-
-        $database->execute(
+        Ctx::$database->execute(
             "INSERT INTO artist_urls (artist_id, created, updated, url, user_id) VALUES (:artist_id, now(), now(), :url, :user_id)",
             ['artist' => $artistID, 'url' => $url, 'user_id' => $userID]
         );
@@ -902,7 +819,6 @@ class Artists extends Extension
 
     private function add_alias(): void
     {
-        global $user;
         $inputs = validate_input([
             "artistID" => "int",
             "aliases" => "string,lower",
@@ -912,16 +828,14 @@ class Artists extends Extension
 
         foreach ($aliases as $alias) {
             if (!$this->alias_exists($artistID, $alias)) {
-                $this->save_new_alias($artistID, $alias, $user->id);
+                $this->save_new_alias($artistID, $alias, Ctx::$user->id);
             }
         }
     }
 
     private function save_new_alias(int $artistID, string $alias, int $userID): void
     {
-        global $database;
-
-        $database->execute(
+        Ctx::$database->execute(
             "INSERT INTO artist_alias (artist_id, created, updated, alias, user_id) VALUES (:artist_id, now(), now(), :alias, :user_id)",
             ['artist_id' => $artistID, 'alias' => $alias, 'user_id' => $userID]
         );
@@ -929,7 +843,6 @@ class Artists extends Extension
 
     private function add_members(): void
     {
-        global $user;
         $inputs = validate_input([
             "artistID" => "int",
             "members" => "string,lower",
@@ -939,16 +852,14 @@ class Artists extends Extension
 
         foreach ($members as $member) {
             if (!$this->member_exists($artistID, $member)) {
-                $this->save_new_member($artistID, $member, $user->id);
+                $this->save_new_member($artistID, $member, Ctx::$user->id);
             }
         }
     }
 
     private function save_new_member(int $artistID, string $member, int $userID): void
     {
-        global $database;
-
-        $database->execute(
+        Ctx::$database->execute(
             "INSERT INTO artist_members (artist_id, name, created, updated, user_id) VALUES (:artist_id, :name, now(), now(), :user_id)",
             ['artist' => $artistID, 'name' => $member, 'user_id' => $userID]
         );
@@ -956,46 +867,36 @@ class Artists extends Extension
 
     private function member_exists(int $artistID, string $member): bool
     {
-        global $database;
-
-        $result = $database->get_one(
+        $result = Ctx::$database->get_one(
             "SELECT COUNT(1) FROM artist_members WHERE artist_id = :artist_id AND name = :name",
             ['artist_id' => $artistID, 'name' => $member]
         );
-        return ($result != 0);
+        return ($result !== 0);
     }
 
     private function url_exists(int $artistID, string $url): bool
     {
-        global $database;
-
-        $result = $database->get_one(
+        $result = Ctx::$database->get_one(
             "SELECT COUNT(1) FROM artist_urls WHERE artist_id = :artist_id AND url = :url",
             ['artist_id' => $artistID, 'url' => $url]
         );
-        return ($result != 0);
+        return ($result !== 0);
     }
 
     /**
      * HERE WE GET THE INFO OF THE ALIAS
      *
-     * @return array<string, mixed>
+     * @return ArtistAlias[]
      */
     private function get_alias(int $artistID): array
     {
-        global $database;
-
-        $result = $database->get_all("
-            SELECT id AS alias_id, alias AS alias_name
+        /** @var array<array{id: int, alias: string}> */
+        $result = Ctx::$database->get_all("
+            SELECT id, alias
             FROM artist_alias
             WHERE artist_id = :artist_id
             ORDER BY alias ASC
         ", ['artist_id' => $artistID]);
-
-        $rc = count($result);
-        for ($i = 0; $i < $rc; $i++) {
-            $result[$i]["alias_name"] = stripslashes($result[$i]["alias_name"]);
-        }
         return $result;
     }
 }

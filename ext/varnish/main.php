@@ -4,15 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class VarnishPurger extends Extension
+final class VarnishPurger extends Extension
 {
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_string('varnish_host', '127.0.0.1');
-        $config->set_default_int('varnish_port', 80);
-        $config->set_default_string('varnish_protocol', 'http');
-    }
+    public const KEY = "varnish";
 
     private function curl_purge(string $path): void
     {
@@ -21,10 +15,9 @@ class VarnishPurger extends Extension
             return;
         }
 
-        global $config;
-        $host = $config->get_string('varnish_host');
-        $port = $config->get_int('varnish_port');
-        $protocol = $config->get_string('varnish_protocol');
+        $host = Ctx::$config->get(VarnishPurgerConfig::HOST);
+        $port = Ctx::$config->get(VarnishPurgerConfig::PORT);
+        $protocol = Ctx::$config->get(VarnishPurgerConfig::PROTOCOL);
         $url = $protocol . '://'. $host . '/' . $path;
         $ch = \Safe\curl_init();
         \Safe\curl_setopt($ch, CURLOPT_URL, $url);
@@ -33,7 +26,7 @@ class VarnishPurger extends Extension
         \Safe\curl_setopt($ch, CURLOPT_TIMEOUT, 5);
         $result = \Safe\curl_exec($ch);
         $httpCode = \Safe\curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        if ($httpCode != 200) {
+        if ($httpCode !== 200) {
             throw new ServerError('PURGE ' . $url . ' unsuccessful (HTTP '. $httpCode . ')');
         }
         curl_close($ch);

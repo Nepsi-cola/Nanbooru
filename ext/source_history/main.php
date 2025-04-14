@@ -4,8 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class SourceHistory extends Extension
+final class SourceHistory extends Extension
 {
+    public const KEY = "source_history";
     /** @var SourceHistoryTheme */
     protected Themelet $theme;
 
@@ -15,12 +16,6 @@ class SourceHistory extends Extension
         return 40;
     }
 
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_int("history_limit", -1);
-    }
-
     public function onAdminBuilding(AdminBuildingEvent $event): void
     {
         $this->theme->display_admin_block();
@@ -28,20 +23,18 @@ class SourceHistory extends Extension
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
-
-        if ($event->page_matches("source_history/revert", method: "POST", permission: Permissions::EDIT_IMAGE_TAG)) {
+        if ($event->page_matches("source_history/revert", method: "POST", permission: PostTagsPermission::EDIT_IMAGE_TAG)) {
             // this is a request to revert to a previous version of the source
-            $this->process_revert_request((int)$event->req_POST('revert'));
-        } elseif ($event->page_matches("source_history/bulk_revert", method: "POST", permission: Permissions::BULK_EDIT_IMAGE_TAG)) {
+            $this->process_revert_request((int)$event->POST->req('revert'));
+        } elseif ($event->page_matches("source_history/bulk_revert", method: "POST", permission: BulkActionsPermission::BULK_EDIT_IMAGE_TAG)) {
             $this->process_bulk_revert_request();
         } elseif ($event->page_matches("source_history/all/{page}")) {
             $page_id = $event->get_iarg('page');
-            $this->theme->display_global_page($page, $this->get_global_source_history($page_id), $page_id);
+            $this->theme->display_global_page($this->get_global_source_history($page_id), $page_id);
         } elseif ($event->page_matches("source_history/{image_id}")) {
             // must be an attempt to view a source history
             $image_id = $event->get_iarg('image_id');
-            $this->theme->display_history_page($page, $image_id, $this->get_source_history_from_id($image_id));
+            $this->theme->display_history_page($image_id, $this->get_source_history_from_id($image_id));
         }
     }
 
@@ -55,19 +48,6 @@ class SourceHistory extends Extension
         $event->add_button("View Source History", "source_history/{$event->image->id}", 20);
     }
 
-    /*
-    // disk space is cheaper than manually rebuilding history,
-    // so let's default to -1 and the user can go advanced if
-    // they /really/ want to
-    public function onSetupBuilding(SetupBuildingEvent $event) {
-        $sb = $event->panel->create_new_block("Source History");
-        $sb->add_label("Limit to ");
-        $sb->add_int_option("history_limit");
-        $sb->add_label(" entires per image");
-        $sb->add_label("<br>(-1 for unlimited)");
-    }
-    */
-
     public function onSourceSet(SourceSetEvent $event): void
     {
         $this->add_source_history($event->image, $event->source);
@@ -75,18 +55,16 @@ class SourceHistory extends Extension
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        global $user;
         if ($event->parent === "system") {
-            if ($user->can(Permissions::BULK_EDIT_IMAGE_TAG)) {
-                $event->add_nav_link("source_history", new Link('source_history/all/1'), "Source Changes", NavLink::is_active(["source_history"]));
+            if (Ctx::$user->can(BulkActionsPermission::BULK_EDIT_IMAGE_TAG)) {
+                $event->add_nav_link(make_link('source_history/all/1'), "Source Changes", ["source_history"]);
             }
         }
     }
 
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::BULK_EDIT_IMAGE_TAG)) {
+        if (Ctx::$user->can(BulkActionsPermission::BULK_EDIT_IMAGE_TAG)) {
             $event->add_link("Source Changes", make_link("source_history/all/1"));
         }
     }
@@ -95,7 +73,7 @@ class SourceHistory extends Extension
     {
         global $database;
 
-        if ($this->get_version("ext_source_history_version") < 1) {
+        if ($this->get_version() < 1) {
             $database->create_table("source_histories", "
 	    		id SCORE_AIPK,
 	    		image_id INTEGER NOT NULL,
@@ -107,18 +85,18 @@ class SourceHistory extends Extension
 				FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 			");
             $database->execute("CREATE INDEX source_histories_image_id_idx ON source_histories(image_id)", []);
-            $this->set_version("ext_source_history_version", 3);
+            $this->set_version(3);
         }
 
-        if ($this->get_version("ext_source_history_version") == 1) {
+        if ($this->get_version() === 1) {
             $database->execute("ALTER TABLE source_histories ADD COLUMN user_id INTEGER NOT NULL");
             $database->execute("ALTER TABLE source_histories ADD COLUMN date_set DATETIME NOT NULL");
-            $this->set_version("ext_source_history_version", 2);
+            $this->set_version(2);
         }
 
-        if ($this->get_version("ext_source_history_version") == 2) {
+        if ($this->get_version() === 2) {
             $database->execute("ALTER TABLE source_histories ADD COLUMN user_ip CHAR(15) NOT NULL");
-            $this->set_version("ext_source_history_version", 3);
+            $this->set_version(3);
         }
     }
 
@@ -127,12 +105,9 @@ class SourceHistory extends Extension
      */
     private function process_revert_request(int $revert_id): void
     {
-        global $page;
-
         // check for the nothing case
         if ($revert_id < 1) {
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link());
+            Ctx::$page->set_redirect(make_link());
             return;
         }
 
@@ -143,8 +118,7 @@ class SourceHistory extends Extension
             // there is no history entry with that id so either the image was deleted
             // while the user was viewing the history, someone is playing with form
             // variables or we have messed up in code somewhere.
-            /* calling die() is probably not a good idea, we should throw an Exception */
-            die("Error: No source history with specified id was found.");
+            throw new HistoryNotFound("No source history with specified id was found.");
         }
 
         // lets get the values out of the result
@@ -152,20 +126,15 @@ class SourceHistory extends Extension
         $stored_image_id = (int)$result['image_id'];
         $stored_source = $result['source'];
 
-        log_debug("source_history", 'Reverting source of >>'.$stored_image_id.' to ['.$stored_source.']');
+        Log::debug("source_history", 'Reverting source of >>'.$stored_image_id.' to ['.$stored_source.']');
 
-        $image = Image::by_id($stored_image_id);
-
-        if (is_null($image)) {
-            die('Error: No image with the id ('.$stored_image_id.') was found. Perhaps the image was deleted while processing this request.');
-        }
+        $image = Image::by_id_ex($stored_image_id);
 
         // all should be ok so we can revert by firing the SetUserSources event.
         send_event(new SourceSetEvent($image, $stored_source));
 
         // all should be done now so redirect the user back to the image
-        $page->set_mode(PageMode::REDIRECT);
-        $page->set_redirect(make_link('post/view/'.$stored_image_id));
+        Ctx::$page->set_redirect(make_link('post/view/'.$stored_image_id));
     }
 
     private function process_bulk_revert_request(): void
@@ -189,7 +158,7 @@ class SourceHistory extends Extension
         }
 
         if (isset($_POST['revert_date']) && !empty($_POST['revert_date'])) {
-            if (isValidDate($_POST['revert_date'])) {
+            if (is_valid_date($_POST['revert_date'])) {
                 $revert_date = addslashes($_POST['revert_date']); // addslashes is really unnecessary since we just checked if valid, but better safe.
             } else {
                 $this->theme->display_admin_block('Invalid Date');
@@ -199,7 +168,7 @@ class SourceHistory extends Extension
             $revert_date = null;
         }
 
-        shm_set_timeout(null); // reverting changes can take a long time, disable php's timelimit if possible.
+        Ctx::$event_bus->set_timeout(null); // reverting changes can take a long time, disable php's timelimit if possible.
 
         // Call the revert function.
         $this->process_revert_all_changes($revert_name, $revert_ip, $revert_date);
@@ -222,12 +191,12 @@ class SourceHistory extends Extension
     }
 
     /**
-     * @return array<string, mixed>
+     * @return non-empty-array<string, mixed>
      */
     private function get_source_history_from_id(int $image_id): array
     {
         global $database;
-        return $database->get_all(
+        $entries = $database->get_all(
             "
 				SELECT source_histories.*, users.name
 				FROM source_histories
@@ -236,6 +205,10 @@ class SourceHistory extends Extension
 				ORDER BY source_histories.id DESC",
             ["image_id" => $image_id]
         );
+        if (empty($entries)) {
+            throw new HistoryNotFound("No source history for Image #$image_id was found.");
+        }
+        return $entries;
     }
 
     /**
@@ -279,12 +252,12 @@ class SourceHistory extends Extension
             $select_args['date_set'] = $date;
         }
 
-        if (count($select_code) == 0) {
-            log_error("source_history", "Tried to mass revert without any conditions");
+        if (count($select_code) === 0) {
+            Log::error("source_history", "Tried to mass revert without any conditions");
             return;
         }
 
-        log_info("source_history", 'Attempting to revert edits where '.implode(" and ", $select_code)." (".implode(" / ", $select_args).")");
+        Log::info("source_history", 'Attempting to revert edits where '.implode(" and ", $select_code)." (".implode(" / ", $select_args).")");
 
         // Get all the images that the given IP has changed source on (within the timeframe) that were last editied by the given IP
         $result = $database->get_col('
@@ -298,7 +271,8 @@ class SourceHistory extends Extension
 
         foreach ($result as $image_id) {
             // Get the first source history that was done before the given IP edit
-            $row = $database->get_row('
+            // @phpstan-ignore-next-line
+            $row = Ctx::$database->get_row('
 				SELECT id, source
 				FROM source_histories
 				WHERE image_id='.$image_id.'
@@ -313,8 +287,7 @@ class SourceHistory extends Extension
                 if (empty($result)) {
                     // there is no history entry with that id so either the image was deleted
                     // while the user was viewing the history,  or something messed up
-                    /* calling die() is probably not a good idea, we should throw an Exception */
-                    die('Error: No source history with specified id ('.$revert_id.') was found in the database.'."\n\n".
+                    throw new ObjectNotFound('Error: No source history with specified id ('.$revert_id.') was found in the database.'."\n\n".
                         'Perhaps the image was deleted while processing this request.');
                 }
 
@@ -323,7 +296,7 @@ class SourceHistory extends Extension
                 $stored_image_id = $result['image_id'];
                 $stored_source = $result['source'];
 
-                log_debug("source_history", 'Reverting source of >>'.$stored_image_id.' to ['.$stored_source.']');
+                Log::debug("source_history", 'Reverting source of >>'.$stored_image_id.' to ['.$stored_source.']');
 
                 $image = Image::by_id_ex($stored_image_id);
 
@@ -333,7 +306,7 @@ class SourceHistory extends Extension
             }
         }
 
-        log_info("source_history", 'Reverted '.count($result).' edits.');
+        Log::info("source_history", 'Reverted '.count($result).' edits.');
     }
 
     /**
@@ -341,35 +314,36 @@ class SourceHistory extends Extension
      */
     private function add_source_history(Image $image, string $source): void
     {
-        global $database, $config, $user;
+        global $database;
 
         $new_source = $source;
         $old_source = $image->source;
 
-        if ($new_source == $old_source) {
+        if ($new_source === $old_source) {
             return;
         }
 
         if (empty($old_source)) {
             /* no old source, so we are probably adding the image for the first time */
-            log_debug("source_history", "adding new source history: [$new_source]");
+            Log::debug("source_history", "adding new source history: [$new_source]");
         } else {
-            log_debug("source_history", "adding source history: [$old_source] -> [$new_source]");
+            Log::debug("source_history", "adding source history: [$old_source] -> [$new_source]");
         }
 
-        $allowed = $config->get_int("history_limit");
-        if ($allowed == 0) {
+        $allowed = Ctx::$config->get(SourceHistoryConfig::MAX_HISTORY);
+        if ($allowed === 0) {
             return;
         }
 
         // if the image has no history, make one with the old source
         $entries = $database->get_one("SELECT COUNT(*) FROM source_histories WHERE image_id = :image_id", ['image_id' => $image->id]);
-        if ($entries == 0 && !empty($old_source)) {
+        assert(is_int($entries));
+        if ($entries === 0 && !empty($old_source)) {
             $database->execute(
                 "
 				INSERT INTO source_histories(image_id, source, user_id, user_ip, date_set)
 				VALUES (:image_id, :source, :user_id, :user_ip, now())",
-                ["image_id" => $image->id, "source" => $old_source, "user_id" => $config->get_int('anon_id'), "user_ip" => '127.0.0.1']
+                ["image_id" => $image->id, "source" => $old_source, "user_id" => Ctx::$config->get(UserAccountsConfig::ANON_ID), "user_ip" => '127.0.0.1']
             );
             $entries++;
         }
@@ -379,12 +353,12 @@ class SourceHistory extends Extension
             "
 				INSERT INTO source_histories(image_id, source, user_id, user_ip, date_set)
 				VALUES (:image_id, :source, :user_id, :user_ip, now())",
-            ["image_id" => $image->id, "source" => $new_source, "user_id" => $user->id, "user_ip" => get_real_ip()]
+            ["image_id" => $image->id, "source" => $new_source, "user_id" => Ctx::$user->id, "user_ip" => Network::get_real_ip()]
         );
         $entries++;
 
         // if needed remove oldest one
-        if ($allowed == -1) {
+        if ($allowed === -1) {
             return;
         }
         if ($entries > $allowed) {

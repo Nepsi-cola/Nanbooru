@@ -5,16 +5,16 @@ declare(strict_types=1);
 namespace Shimmie2;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\{InputInterface,InputArgument};
+use Symfony\Component\Console\Input\{InputArgument, InputInterface};
 use Symfony\Component\Console\Output\OutputInterface;
 
-class BulkAddEvent extends Event
+final class BulkAddEvent extends Event
 {
-    public string $dir;
+    public Path $dir;
     /** @var UploadResult[] */
     public array $results;
 
-    public function __construct(string $dir)
+    public function __construct(Path $dir)
     {
         parent::__construct();
         $this->dir = $dir;
@@ -22,19 +22,20 @@ class BulkAddEvent extends Event
     }
 }
 
-class BulkAdd extends Extension
+final class BulkAdd extends Extension
 {
+    public const KEY = "bulk_add";
     /** @var BulkAddTheme */
     protected Themelet $theme;
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
-        if ($event->page_matches("bulk_add", method: "POST", permission: Permissions::BULK_ADD)) {
-            $dir = $event->req_POST('dir');
-            shm_set_timeout(null);
-            $bae = send_event(new BulkAddEvent($dir));
-            $this->theme->display_upload_results($page, $bae->results);
+        if ($event->page_matches("bulk_add", method: "POST", permission: BulkAddPermission::BULK_ADD)) {
+            $dir = $event->POST->req('dir');
+            assert(!empty($dir), "Directory cannot be empty");
+            Ctx::$event_bus->set_timeout(null);
+            $bae = send_event(new BulkAddEvent(new Path($dir)));
+            $this->theme->display_upload_results($bae->results);
         }
     }
 
@@ -64,10 +65,10 @@ class BulkAdd extends Extension
 
     public function onBulkAdd(BulkAddEvent $event): void
     {
-        if (is_dir($event->dir) && is_readable($event->dir)) {
-            $event->results = add_dir($event->dir);
+        if ($event->dir->is_dir() && $event->dir->is_readable()) {
+            $event->results = send_event(new DirectoryUploadEvent($event->dir))->results;
         } else {
-            $event->results = [new UploadError($event->dir, "is not a readable directory")];
+            $event->results = [new UploadError($event->dir->str(), "is not a readable directory")];
         }
     }
 }

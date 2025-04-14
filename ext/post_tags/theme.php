@@ -6,29 +6,26 @@ namespace Shimmie2;
 
 use MicroHTML\HTMLElement;
 
-use function MicroHTML\{joinHTML, A, TEXTAREA, TR, TH, TD, INPUT, rawHTML};
+use function MicroHTML\{INPUT, TABLE, TD, TEXTAREA, TH, TR, joinHTML};
 
 class PostTagsTheme extends Themelet
 {
     public function display_mass_editor(): void
     {
-        global $page;
-        $html = "
-		" . make_form(make_link("tag_edit/replace")) . "
-			<table class='form'>
-				<tr><th>Search</th><td><input type='text' name='search' class='autocomplete_tags'></tr>
-				<tr><th>Replace</th><td><input type='text' name='replace' class='autocomplete_tags'></td></tr>
-				<tr><td colspan='2'><input type='submit' value='Replace'></td></tr>
-			</table>
-		</form>
-		";
-        $page->add_block(new Block("Mass Tag Edit", rawHTML($html)));
+        $html = SHM_SIMPLE_FORM(
+            make_link("tag_edit/replace"),
+            TABLE(
+                ["class" => "form"],
+                TR(TH("Search"), TD(INPUT(["type" => "text", "name" => "search", "class" => "autocomplete_tags"]))),
+                TR(TH("Replace"), TD(INPUT(["type" => "text", "name" => "replace", "class" => "autocomplete_tags"]))),
+                TR(TD(["colspan" => "2"], SHM_SUBMIT("Replace")))
+            )
+        );
+        Ctx::$page->add_block(new Block("Mass Tag Edit", $html));
     }
 
     public function get_tag_editor_html(Image $image): HTMLElement
     {
-        global $user;
-
         $tag_links = [];
         foreach ($image->get_tag_array() as $tag) {
             $tag_links[] = $this->build_tag($tag);
@@ -37,14 +34,14 @@ class PostTagsTheme extends Themelet
         return SHM_POST_INFO(
             "Tags",
             joinHTML(", ", $tag_links),
-            $user->can(Permissions::EDIT_IMAGE_TAG) ? TEXTAREA([
+            Ctx::$user->can(PostTagsPermission::EDIT_IMAGE_TAG) ? TEXTAREA([
                 "class" => "autocomplete_tags",
                 "type" => "text",
                 "name" => "tags",
                 "id" => "tag_editor",
                 "spellcheck" => "off",
             ], $image->get_tag_list()) : null,
-            link: Extension::is_enabled(TagHistoryInfo::KEY) ?
+            link: TagHistoryInfo::is_enabled() ?
                 make_link("tag_history/{$image->id}") :
                 null,
         );
@@ -65,7 +62,7 @@ class PostTagsTheme extends Themelet
                 "type" => "text",
                 "name" => "tags{$suffix}",
                 "class" => "autocomplete_tags",
-                "value" => ($suffix == 0) ? @$_GET['tags'] : null,
+                "value" => ($suffix === "0") ? @$_GET['tags'] : null,
             ])
         );
     }

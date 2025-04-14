@@ -4,11 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroCRUD\ActionColumn;
-use MicroCRUD\TextColumn;
-use MicroCRUD\Table;
+use MicroCRUD\{ActionColumn, Table};
 
-class AliasTable extends Table
+final class AliasTable extends Table
 {
     public function __construct(\FFSPHP\PDO $db)
     {
@@ -28,7 +26,7 @@ class AliasTable extends Table
     }
 }
 
-class AddAliasEvent extends Event
+final class AddAliasEvent extends Event
 {
     public string $oldtag;
     public string $newtag;
@@ -41,66 +39,61 @@ class AddAliasEvent extends Event
     }
 }
 
-class DeleteAliasEvent extends Event
+final class DeleteAliasEvent extends Event
 {
-    public string $oldtag;
-
-    public function __construct(string $oldtag)
-    {
+    public function __construct(
+        public string $oldtag
+    ) {
         parent::__construct();
-        $this->oldtag = $oldtag;
     }
 }
 
-class AddAliasException extends UserError
+final class AddAliasException extends UserError
 {
 }
 
-class AliasEditor extends Extension
+final class AliasEditor extends Extension
 {
+    public const KEY = "alias_editor";
     /** @var AliasEditorTheme */
     protected Themelet $theme;
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $config, $database, $page, $user;
+        global $database;
+        $page = Ctx::$page;
 
-        if ($event->page_matches("alias/add", method: "POST", permission: Permissions::MANAGE_ALIAS_LIST)) {
+        if ($event->page_matches("alias/add", method: "POST", permission: AliasEditorPermission::MANAGE_ALIAS_LIST)) {
             $input = validate_input(["c_oldtag" => "string", "c_newtag" => "string"]);
             send_event(new AddAliasEvent($input['c_oldtag'], $input['c_newtag']));
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("alias/list"));
         }
-        if ($event->page_matches("alias/remove", method: "POST", permission: Permissions::MANAGE_ALIAS_LIST)) {
+        if ($event->page_matches("alias/remove", method: "POST", permission: AliasEditorPermission::MANAGE_ALIAS_LIST)) {
             $input = validate_input(["d_oldtag" => "string"]);
             send_event(new DeleteAliasEvent($input['d_oldtag']));
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("alias/list"));
         }
         if ($event->page_matches("alias/list")) {
             $t = new AliasTable($database->raw_db());
-            $t->token = $user->get_auth_token();
-            $t->inputs = $event->GET;
-            $t->size = $config->get_int('alias_items_per_page', 30);
-            if ($user->can(Permissions::MANAGE_ALIAS_LIST)) {
+            $t->token = Ctx::$user->get_auth_token();
+            $t->inputs = $event->GET->toArray();
+            $t->size = 100;
+            if (Ctx::$user->can(AliasEditorPermission::MANAGE_ALIAS_LIST)) {
                 $t->create_url = make_link("alias/add");
                 $t->delete_url = make_link("alias/remove");
             }
             $this->theme->display_aliases($t->table($t->query()), $t->paginator());
         }
         if ($event->page_matches("alias/export/aliases.csv")) {
-            $page->set_mode(PageMode::DATA);
-            $page->set_mime(MimeType::CSV);
             $page->set_filename("aliases.csv");
-            $page->set_data($this->get_alias_csv($database));
+            $page->set_data(MimeType::CSV, $this->get_alias_csv($database));
         }
-        if ($event->page_matches("alias/import", method: "POST", permission: Permissions::MANAGE_ALIAS_LIST)) {
+        if ($event->page_matches("alias/import", method: "POST", permission: AliasEditorPermission::MANAGE_ALIAS_LIST)) {
             if (count($_FILES) > 0) {
                 $tmp = $_FILES['alias_file']['tmp_name'];
                 $contents = \Safe\file_get_contents($tmp);
                 $this->add_alias_csv($contents);
-                log_info("alias_editor", "Imported aliases from file", "Imported aliases"); # FIXME: how many?
-                $page->set_mode(PageMode::REDIRECT);
+                Log::info("alias_editor", "Imported aliases from file", "Imported aliases"); # FIXME: how many?
                 $page->set_redirect(make_link("alias/list"));
             } else {
                 throw new InvalidInput("No File Specified");
@@ -132,27 +125,26 @@ class AliasEditor extends Extension
             "INSERT INTO aliases(oldtag, newtag) VALUES(:oldtag, :newtag)",
             ["oldtag" => $event->oldtag, "newtag" => $event->newtag]
         );
-        log_info("alias_editor", "Added alias for {$event->oldtag} -> {$event->newtag}", "Added alias");
+        Log::info("alias_editor", "Added alias for {$event->oldtag} -> {$event->newtag}", "Added alias");
     }
 
     public function onDeleteAlias(DeleteAliasEvent $event): void
     {
         global $database;
         $database->execute("DELETE FROM aliases WHERE oldtag=:oldtag", ["oldtag" => $event->oldtag]);
-        log_info("alias_editor", "Deleted alias for {$event->oldtag}", "Deleted alias");
+        Log::info("alias_editor", "Deleted alias for {$event->oldtag}", "Deleted alias");
     }
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        if ($event->parent == "tags") {
-            $event->add_nav_link("aliases", new Link('alias/list'), "Aliases", NavLink::is_active(["alias"]));
+        if ($event->parent === "tags") {
+            $event->add_nav_link(make_link('alias/list'), "Aliases", ["alias"]);
         }
     }
 
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::MANAGE_ALIAS_LIST)) {
+        if (Ctx::$user->can(AliasEditorPermission::MANAGE_ALIAS_LIST)) {
             $event->add_link("Alias Editor", make_link("alias/list"));
         }
     }
@@ -174,7 +166,7 @@ class AliasEditor extends Extension
         $i = 0;
         foreach (explode("\n", $csv) as $line) {
             $parts = str_getcsv($line);
-            if (count($parts) == 2) {
+            if (count($parts) === 2) {
                 assert(is_string($parts[0]));
                 assert(is_string($parts[1]));
                 send_event(new AddAliasEvent($parts[0], $parts[1]));

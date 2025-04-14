@@ -5,15 +5,18 @@
 	--text: #000;
 	--link-default: #0000EE;
 	--link-visited: #551A8B;
-	
+
 	--title: #BBB;
 	--title-border: #AAA;
-	
+
 	--header: #CCC;
 	--header-border: #BBB;
-	
+
 	--block: #DDD;
 	--block-border: #CCC;
+
+	--danger-color: #000;
+	--danger-background: #FAA;
 
 	--zebra-border: #CCC;
 	--zebra-header: #DDD;
@@ -23,28 +26,31 @@
 	--border-radius: 0.75rem;
 	--block-padding: 0.5rem;
 }
-  
+
 @media (prefers-color-scheme: dark) {
 	:root {
 		--page: #222;
 		--text: #CCC;
 		--link-default: #BBF;
 		--link-visited: #EAF;
-			
+
 		--title: #333;
 		--title-border: #555;
-		
+
 		--header: #444;
 		--header-border: #666;
-		
+
 		--block: #555;
 		--block-border: #777;
-	
+
+		--danger-color: #CCC;
+		--danger-background: #955;
+
 		--zebra-border: #777;
 		--zebra-header: #444;
 		--zebra-odd: #555;
 		--zebra-even: #666;
-	}	
+	}
 }
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -58,7 +64,6 @@
 H1, H2, H3 {
 	margin: 0;
 	text-align: center;
-	word-break: break-all;
 	/* not sure why top-padding appears visually larger than other padding in headers...
 	reducing top-padding to compensate */
 	padding: calc(var(--block-padding) * 0.5) var(--block-padding) var(--block-padding) var(--block-padding);
@@ -142,11 +147,15 @@ TD {
 TABLE.zebra {border-spacing: 0; border: 2px solid var(--zebra-border);}
 TABLE.zebra TD, TABLE.zebra TH {vertical-align: middle; padding: 4px;}
 TABLE.zebra THEAD {position: sticky;top: 0;}
-TABLE.zebra THEAD TR:last-child TD, TABLE.zebra TR:last-child THEAD TH {border-bottom: 2px solid var(--zebra-border);}
-TABLE.zebra TFOOT TR:first-child TD, TABLE.zebra TFOOT TR:first-child TH {border-top: 2px solid var(--zebra-border);}
-TABLE.zebra TR TD {border-bottom: 1px solid var(--zebra-header);}
+TABLE.zebra THEAD TR:last-of-type TD, TABLE.zebra THEAD TR:last-of-type TH {border-bottom: 2px solid var(--zebra-border);}
+TABLE.zebra TFOOT TR:first-of-type TD, TABLE.zebra TFOOT TR:first-of-type TH {border-top: 2px solid var(--zebra-border);}
+TABLE.zebra TBODY TR TD, TABLE.zebra TBODY TR TH {border-bottom: 1px solid var(--zebra-header);}
 TABLE.zebra TR:nth-child(odd) {background: var(--zebra-odd);}
 TABLE.zebra TR:nth-child(even) {background: var(--zebra-even);}
+TABLE.zebra INPUT:not([type="checkbox"]):not([type="radio"]),
+TABLE.zebra SELECT,
+TABLE.zebra TEXTAREA,
+TABLE.zebra BUTTON {width: 100%;}
 
 A {
 	text-decoration: none;
@@ -164,7 +173,7 @@ UL {
 }
 
 CODE {
-	background: #BBB;
+	background: var(--header);
 	font-size: 0.9rem;
 }
 
@@ -185,9 +194,9 @@ NAV .blockbody {
 NAV TABLE {
 	width: 100%;
 }
-NAV INPUT {
-	width: 100%;
-}
+NAV INPUT:not([type="checkbox"]):not([type="radio"]),
+NAV TEXTAREA,
+NAV BUTTON,
 NAV SELECT {
 	width: 100%;
 }

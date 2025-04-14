@@ -4,29 +4,29 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
-
 use function MicroHTML\{A,DIV,SPAN,joinHTML};
+
+use MicroHTML\HTMLElement;
 
 class LiteCommonElementsTheme extends CommonElementsTheme
 {
-    public function display_paginator(Page $page, string $base, ?string $query, int $page_number, int $total_pages, bool $show_random = false): void
+    public function display_paginator(string $base, ?QueryArray $query, int $page_number, int $total_pages, bool $show_random = false): void
     {
-        if ($total_pages == 0) {
+        if ($total_pages === 0) {
             $total_pages = 1;
         }
         $body = $this->litetheme_build_paginator($page_number, $total_pages, $base, $query, $show_random);
-        $page->add_block(new Block("Paginator", $body, "main", 90));
+        Ctx::$page->add_block(new Block("Paginator", $body, "main", 90));
     }
 
-    public function litetheme_gen_page_link(string $base_url, ?string $query, int $page, string $name, ?string $link_class = null): HTMLElement
+    public function litetheme_gen_page_link(string $base_url, ?QueryArray $query, int $page, string $name, ?string $link_class = null): HTMLElement
     {
         return A(["href" => make_link("$base_url/$page", $query), "class" => $link_class], $name);
     }
 
-    public function litetheme_gen_page_link_block(string $base_url, ?string $query, int $page, int $current_page, string $name): HTMLElement
+    public function litetheme_gen_page_link_block(string $base_url, ?QueryArray $query, int $page, int $current_page, string $name): HTMLElement
     {
-        if ($page == $current_page) {
+        if ($page === $current_page) {
             $link_class = "tab-selected";
         } else {
             $link_class = "";
@@ -34,7 +34,7 @@ class LiteCommonElementsTheme extends CommonElementsTheme
         return $this->litetheme_gen_page_link($base_url, $query, $page, $name, $link_class);
     }
 
-    public function litetheme_build_paginator(int $current_page, int $total_pages, string $base_url, ?string $query, bool $show_random): HTMLElement
+    public function litetheme_build_paginator(int $current_page, int $total_pages, string $base_url, ?QueryArray $query, bool $show_random): HTMLElement
     {
         $next = $current_page + 1;
         $prev = $current_page - 1;

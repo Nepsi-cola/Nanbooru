@@ -4,39 +4,38 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\{rawHTML};
+use function MicroHTML\{INPUT, OPTION, SELECT};
 
 class TranscodeVideoTheme extends Themelet
 {
     /**
      * Display a link to resize an image
      *
-     * @param array<string, string> $options
+     * @param array<string, ?VideoContainer> $options
      */
     public function get_transcode_html(Image $image, array $options): \MicroHTML\HTMLElement
     {
-        $html = make_form(
+        return SHM_SIMPLE_FORM(
             make_link("transcode_video/{$image->id}"),
-            //onsubmit: "return transcodeSubmit()"
-        )."
-                <input type='hidden' name='codec' value='{$image->video_codec}'>
-                ".$this->get_transcode_picker_html($options)."
-				<br><input id='transcodebutton' type='submit' value='Transcode Video'>
-			</form>
-		";
-
-        return rawHTML($html);
+            INPUT(["type" => "hidden", "name" => "codec", "value" => $image->video_codec?->value]),
+            $this->get_transcode_picker_html($options),
+            SHM_SUBMIT("Transcode Video")
+        );
     }
 
     /**
-     * @param array<string, string> $options
+     * @param array<string, ?VideoContainer> $options
      */
-    public function get_transcode_picker_html(array $options): string
+    public function get_transcode_picker_html(array $options): \MicroHTML\HTMLElement
     {
-        $html = "<select id='transcode_format'  name='transcode_format' required='required' >";
-        foreach ($options as $display => $value) {
-            $html .= "<option value='$value'>$display</option>";
+        $select = SELECT([
+            "id" => "transcode_format",
+            "name" => "transcode_format",
+            "required" => true,
+        ]);
+        foreach ($options as $name => $container) {
+            $select->appendChild(OPTION(["value" => $container->value ?? ""], $name));
         }
-        return $html."</select>";
+        return $select;
     }
 }

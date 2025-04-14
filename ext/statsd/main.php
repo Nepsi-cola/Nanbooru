@@ -4,26 +4,25 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-_d("STATSD_HOST", null);
-
-class StatsDInterface extends Extension
+final class StatsDInterface extends Extension
 {
+    public const KEY = "statsd";
     /** @var array<string, string> */
     public static array $stats = [];
 
     private function _stats(string $type): void
     {
-        global $_shm_event_count, $cache, $database, $_shm_load_start;
-        $time = ftime() - $_shm_load_start;
+        global $database;
+        $time = ftime() - $_SERVER["REQUEST_TIME_FLOAT"];
         StatsDInterface::$stats["shimmie.$type.hits"] = "1|c";
         StatsDInterface::$stats["shimmie.$type.time"] = "$time|ms";
         StatsDInterface::$stats["shimmie.$type.time-db"] = "{$database->dbtime}|ms";
         StatsDInterface::$stats["shimmie.$type.memory"] = memory_get_peak_usage(true)."|c";
         StatsDInterface::$stats["shimmie.$type.files"] = count(get_included_files())."|c";
         StatsDInterface::$stats["shimmie.$type.queries"] = $database->query_count."|c";
-        StatsDInterface::$stats["shimmie.$type.events"] = $_shm_event_count."|c";
-        StatsDInterface::$stats["shimmie.$type.cache-hits"] = $cache->get("__etc_cache_hits", -1)."|c";
-        StatsDInterface::$stats["shimmie.$type.cache-misses"] = $cache->get("__etc_cache_misses", -1)."|c";
+        StatsDInterface::$stats["shimmie.$type.events"] = Ctx::$event_bus->event_count."|c";
+        StatsDInterface::$stats["shimmie.$type.cache-hits"] = Ctx::$cache->get("__etc_cache_hits", -1)."|c";
+        StatsDInterface::$stats["shimmie.$type.cache-misses"] = Ctx::$cache->get("__etc_cache_misses", -1)."|c";
     }
 
     public function onPageRequest(PageRequestEvent $event): void
@@ -46,9 +45,9 @@ class StatsDInterface extends Extension
             $this->_stats("other");
         }
 
-        // @phpstan-ignore-next-line
-        if (STATSD_HOST) {
-            $this->send(STATSD_HOST, StatsDInterface::$stats, 1.0);
+        $host = Ctx::$config->get(StatsDInterfaceConfig::HOST);
+        if (!is_null($host)) {
+            $this->send($host, StatsDInterface::$stats, 1.0);
         }
 
         StatsDInterface::$stats = [];
@@ -97,7 +96,7 @@ class StatsDInterface extends Extension
             $sampledData = $data;
         }
 
-        if (empty($sampledData)) {
+        if (count($sampledData) === 0) {
             return;
         }
 
@@ -106,7 +105,7 @@ class StatsDInterface extends Extension
             $parts = explode(":", $host);
             $host = $parts[0];
             $port = (int)$parts[1];
-            $fp = fsockopen("udp://$host", $port, $errno, $errstr);
+            $fp = @fsockopen("udp://$host", $port);
             if (!$fp) {
                 return;
             }

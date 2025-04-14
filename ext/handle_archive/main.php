@@ -4,49 +4,43 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class ArchiveFileHandler extends DataHandlerExtension
+final class ArchiveFileHandler extends DataHandlerExtension
 {
-    protected array $SUPPORTED_MIME = [MimeType::ZIP];
-
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_string('archive_extract_command', 'unzip -d "%d" "%f"');
-    }
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Archive Handler Options");
-        $sb->add_text_option("archive_tmp_dir", "Temporary folder: ");
-        $sb->add_text_option("archive_extract_command", "<br>Extraction command: ");
-        $sb->add_label("<br>%f for archive, %d for temporary directory");
-    }
+    public const KEY = "handle_archive";
+    public const SUPPORTED_MIME = [MimeType::ZIP];
 
     public function onDataUpload(DataUploadEvent $event): void
     {
         if ($this->supported_mime($event->mime)) {
-            global $config, $page;
-            $tmpdir = shm_tempnam("archive");
-            unlink($tmpdir);
-            mkdir($tmpdir, 0755, true);
-            $cmd = $config->get_string('archive_extract_command');
-            $cmd = str_replace('%f', $event->tmpname, $cmd);
-            $cmd = str_replace('%d', $tmpdir, $cmd);
-            assert(is_string($cmd));
-            exec($cmd);
-            if (file_exists($tmpdir)) {
+            $tmpdir = shm_tempdir("archive");
+            $cmd = Ctx::$config->get(ArchiveFileHandlerConfig::EXTRACT_COMMAND);
+            $cmd = str_replace('"%f"', "%f", $cmd);
+            $cmd = str_replace('"%d"', "%d", $cmd);
+            $parts = explode(" ", $cmd);
+
+            $command = new CommandBuilder($parts[0]);
+            foreach (array_splice($parts, 1) as $part) {
+                match($part) {
+                    "%f" => $command->add_args($event->tmpname->str()),
+                    "%d" => $command->add_args($tmpdir->str()),
+                    default => $command->add_args($part),
+                };
+            }
+            $command->execute();
+
+            if ($tmpdir->exists()) {
                 try {
-                    $results = add_dir($tmpdir, Tag::explode($event->metadata['tags']));
+                    $results = send_event(new DirectoryUploadEvent($tmpdir, Tag::explode($event->metadata->req('tags'))))->results;
                     foreach ($results as $r) {
                         if (is_a($r, UploadError::class)) {
-                            $page->flash($r->name." failed: ".$r->error);
+                            Ctx::$page->flash($r->name." failed: ".$r->error);
                         }
                         if (is_a($r, UploadSuccess::class)) {
                             $event->images[] = Image::by_id_ex($r->image_id);
                         }
                     }
                 } finally {
-                    deltree($tmpdir);
+                    Filesystem::deltree($tmpdir);
                 }
             }
         }
@@ -61,7 +55,7 @@ class ArchiveFileHandler extends DataHandlerExtension
     {
     }
 
-    protected function check_contents(string $tmpname): bool
+    protected function check_contents(Path $tmpname): bool
     {
         return false;
     }

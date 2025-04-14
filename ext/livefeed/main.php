@@ -4,13 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class LiveFeed extends Extension
+final class LiveFeed extends Extension
 {
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Live Feed");
-        $sb->add_text_option("livefeed_host", "IP:port to send events to: ");
-    }
+    public const KEY = "livefeed";
 
     public function onUserCreation(UserCreationEvent $event): void
     {
@@ -19,27 +15,25 @@ class LiveFeed extends Extension
 
     public function onImageAddition(ImageAdditionEvent $event): void
     {
-        global $user;
         $this->msg(
-            make_http(make_link("post/view/".$event->image->id))." - ".
-            "new post by ".$user->name
+            make_link("post/view/".$event->image->id)->asAbsolute(). " - ".
+            "new post by ".Ctx::$user->name
         );
     }
 
     public function onTagSet(TagSetEvent $event): void
     {
         $this->msg(
-            make_http(make_link("post/view/".$event->image->id))." - ".
+            make_link("post/view/".$event->image->id)->asAbsolute(). " - ".
             "tags set to: ".Tag::implode($event->new_tags)
         );
     }
 
     public function onCommentPosting(CommentPostingEvent $event): void
     {
-        global $user;
         $this->msg(
-            make_http(make_link("post/view/".$event->image_id))." - ".
-            $user->name . ": " . str_replace("\n", " ", $event->comment)
+            make_link("post/view/".$event->image_id)->asAbsolute(). " - ".
+            Ctx::$user->name . ": " . str_replace("\n", " ", $event->comment)
         );
     }
 
@@ -50,10 +44,7 @@ class LiveFeed extends Extension
 
     private function msg(string $data): void
     {
-        global $config;
-
-        $host = $config->get_string("livefeed_host", "127.0.0.1:25252");
-
+        $host = Ctx::$config->get(LiveFeedConfig::HOST);
         if (!$host) {
             return;
         }
@@ -62,7 +53,7 @@ class LiveFeed extends Extension
             $parts = explode(":", $host);
             $host = $parts[0];
             $port = (int)$parts[1];
-            $fp = fsockopen("udp://$host", $port, $errno, $errstr);
+            $fp = fsockopen("udp://$host", $port);
             if (!$fp) {
                 return;
             }

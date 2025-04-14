@@ -5,74 +5,65 @@ declare(strict_types=1);
 namespace Shimmie2;
 
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\{InputInterface,InputArgument};
+use Symfony\Component\Console\Input\{InputArgument, InputInterface};
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
-use function MicroHTML\rawHTML;
-
 require_once "events.php";
 
-class Index extends Extension
+final class Index extends Extension
 {
+    public const KEY = "index";
     /** @var IndexTheme */
     protected Themelet $theme;
 
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_int(IndexConfig::IMAGES, 24);
-        $config->set_default_bool(IndexConfig::TIPS, true);
-        $config->set_default_string(IndexConfig::ORDER, "id DESC");
-    }
-
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $cache, $config, $page, $user;
         if (
             $event->page_matches("post/list", paged: true)
             || $event->page_matches("post/list/{search}", paged: true)
         ) {
-            if ($event->get_GET('search')) {
-                $page->set_mode(PageMode::REDIRECT);
-                $page->set_redirect(search_link(Tag::explode($event->get_GET('search'), false)));
+            if ($event->GET->get('search')) {
+                Ctx::$page->set_redirect(search_link(Tag::explode($event->GET->get('search'), false)));
                 return;
             }
 
             $search_terms = Tag::explode($event->get_arg('search', ""), false);
             $count_search_terms = count($search_terms);
             $page_number = $event->get_iarg('page_num', 1);
-            $page_size = $config->get_int(IndexConfig::IMAGES);
+            $page_size = Ctx::$config->get(IndexConfig::IMAGES);
 
-            $speed_hax = (Extension::is_enabled(SpeedHaxInfo::KEY) && $config->get_bool(SpeedHaxConfig::FAST_PAGE_LIMIT));
-            $fast_page_limit = 500;
+            $search_results_limit = Ctx::$config->get(IndexConfig::SEARCH_RESULTS_LIMIT);
 
-            if (
-                $speed_hax
-                && is_bot()
-                && (
-                    $count_search_terms > 1
-                    || ($count_search_terms == 1 && $search_terms[0][0] == "-")
-                )
-            ) {
-                // bots love searching for weird combinations of tags...
-                $fast_page_limit = 10;
+            if (Ctx::$config->get(IndexConfig::SIMPLE_BOTS_ONLY) && Network::is_bot()) {
+                // Bots aren't allowed to use negative tags or wildcards at all
+                foreach ($search_terms as $term) {
+                    if ($term[0] === "-" || str_contains($term[0], "*")) {
+                        throw new PermissionDenied("Bots are not allowed to use negative tags or wildcards");
+                    }
+                }
+
+                // Bots love searching for weird combinations of tags - let's
+                // limit them to only a few results for multi-tag searches
+                if ($count_search_terms > 1) {
+                    $search_results_limit = 100;
+                }
             }
 
-            if ($speed_hax && $page_number > $fast_page_limit && !$user->can("big_search")) {
+            if ($search_results_limit && $page_number > $search_results_limit / $page_size && !Ctx::$user->can(IndexPermission::BIG_SEARCH)) {
                 throw new PermissionDenied(
-                    "Only $fast_page_limit pages of results are searchable - " .
-                    "if you want to find older results, use more specific search terms"
+                    "Only $search_results_limit search results can be shown at once - " .
+                    "if you want to find older posts, use more specific search terms"
                 );
             }
 
-            $total_pages = (int)ceil(Search::count_images($search_terms) / $config->get_int(IndexConfig::IMAGES));
-            if ($speed_hax && $total_pages > $fast_page_limit && !$user->can("big_search")) {
-                $total_pages = $fast_page_limit;
+            $total_pages = (int)ceil(Search::count_images($search_terms) / Ctx::$config->get(IndexConfig::IMAGES));
+            if ($search_results_limit && $total_pages > $search_results_limit / $page_size && !Ctx::$user->can(IndexPermission::BIG_SEARCH)) {
+                $total_pages = (int)ceil($search_results_limit / $page_size);
             }
 
             $images = null;
-            if (Extension::is_enabled(SpeedHaxInfo::KEY) && $config->get_bool(SpeedHaxConfig::CACHE_FIRST_FEW)) {
+            if (Ctx::$config->get(IndexConfig::CACHE_FIRST_FEW)) {
                 if ($count_search_terms === 0 && ($page_number < 10)) {
                     // extra caching for the first few post/list pages
                     $images = cache_get_or_set(
@@ -89,42 +80,28 @@ class Index extends Extension
             $count_images = count($images);
 
             if ($count_search_terms === 0 && $count_images === 0 && $page_number === 1) {
-                $this->theme->display_intro($page);
+                $this->theme->display_intro();
                 send_event(new PostListBuildingEvent($search_terms));
             } elseif ($count_search_terms > 0 && $count_images === 1 && $page_number === 1) {
-                $page->set_mode(PageMode::REDIRECT);
-                $page->set_redirect(make_link('post/view/'.$images[0]->id));
+                Ctx::$page->set_redirect(make_link('post/view/'.$images[0]->id));
             } else {
-                $plbe = send_event(new PostListBuildingEvent($search_terms));
+                send_event(new PostListBuildingEvent($search_terms));
 
                 $this->theme->set_page($page_number, $total_pages, $search_terms);
-                $this->theme->display_page($page, $images);
-                if (count($plbe->parts) > 0) {
-                    $this->theme->display_admin_block($plbe->parts);
-                }
+                $this->theme->display_page($images);
             }
         }
     }
 
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Index Options");
-        $sb->position = 20;
-
-        $sb->add_label("Show ");
-        $sb->add_int_option(IndexConfig::IMAGES);
-        $sb->add_label(" images on the post list");
-    }
-
     public function onPageNavBuilding(PageNavBuildingEvent $event): void
     {
-        $event->add_nav_link("posts", new Link('post/list'), "Posts", NavLink::is_active(["post","view"]), 20);
+        $event->add_nav_link(search_link(), "Posts", ["post"], category: "posts", order: 20);
     }
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        if ($event->parent == "posts") {
-            $event->add_nav_link("posts_all", new Link('post/list'), "All");
+        if ($event->parent === "posts") {
+            $event->add_nav_link(search_link(), "All");
         }
     }
 
@@ -175,7 +152,7 @@ class Index extends Extension
                 );
 
                 $sql_str = $q->sql;
-                $sql_str = preg_replace_ex("/\s+/", " ", $sql_str);
+                $sql_str = \Safe\preg_replace("/\s+/", " ", $sql_str);
                 foreach ($q->variables as $key => $val) {
                     if (is_string($val)) {
                         $sql_str = str_replace(":$key", "'$val'", $sql_str);
@@ -214,17 +191,26 @@ class Index extends Extension
         } elseif ($matches = $event->matches("/^(filename|name)[=|:](.+)$/i")) {
             $filename = strtolower($matches[2]);
             $event->add_querylet(new Querylet("lower(images.filename) LIKE :filename{$event->id}", ["filename{$event->id}" => "%$filename%"]));
-        } elseif ($matches = $event->matches("/^posted([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])([0-9-]*)$/i")) {
-            // TODO Make this able to search = without needing a time component.
+        } elseif ($matches = $event->matches("/^posted([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])([0-9]{4}[-\/][0-9]{2}[-\/][0-9]{2})$/i")) {
             $cmp = ltrim($matches[1], ":") ?: "=";
-            $val = $matches[2];
-            $event->add_querylet(new Querylet("images.posted $cmp :posted{$event->id}", ["posted{$event->id}" => $val]));
+            $dt = new \Safe\DateTimeImmutable($matches[2]);
+            if ($cmp === "=") {
+                $event->add_querylet(new Querylet(
+                    "images.posted >= :posted{$event->id}_1 AND images.posted < :posted{$event->id}_2",
+                    ["posted{$event->id}_1" => $dt->format('Y-m-d'), "posted{$event->id}_2" => $dt->modify('+1 day')->format('Y-m-d')]
+                ));
+            } else {
+                $event->add_querylet(new Querylet(
+                    "images.posted $cmp :posted{$event->id}",
+                    ["posted{$event->id}" => $dt->format('Y-m-d')]
+                ));
+            }
         } elseif ($matches = $event->matches("/^order[=|:](id|width|height|length|filesize|filename)[_]?(desc|asc)?$/i")) {
             $ord = strtolower($matches[1]);
             $default_order_for_column = \Safe\preg_match("/^(id|filename)$/", $matches[1]) ? "ASC" : "DESC";
             $sort = isset($matches[2]) ? strtoupper($matches[2]) : $default_order_for_column;
             $event->order = "images.$ord $sort";
-        } elseif ($matches = $event->matches("/^order[=|:]random[_]([0-9]{1,4})$/i")) {
+        } elseif ($matches = $event->matches("/^order[=|:]random[_]([0-9]{1,8})$/i")) {
             // requires a seed to avoid duplicates
             // since the tag can't be changed during the parseevent, we instead generate the seed during submit using js
             $seed = (int)$matches[1];
@@ -238,7 +224,7 @@ class Index extends Extension
         }
 
         // If we've reached this far, and nobody else has done anything with this term, then treat it as a tag
-        if (!is_null($event->term) && $event->order === null && $event->img_conditions == [] && $event->tag_conditions == []) {
+        if (!is_null($event->term) && $event->order === null && $event->img_conditions === [] && $event->tag_conditions === []) {
             $event->add_tag_condition(new TagCondition($event->term, !$event->negative));
         }
     }

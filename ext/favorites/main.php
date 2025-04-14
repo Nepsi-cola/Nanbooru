@@ -4,24 +4,22 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class FavoriteSetEvent extends Event
+use function MicroHTML\{A, emptyHTML};
+
+final class FavoriteSetEvent extends Event
 {
-    public int $image_id;
-    public User $user;
-    public bool $do_set;
-
-    public function __construct(int $image_id, User $user, bool $do_set)
-    {
+    public function __construct(
+        public int $image_id,
+        public User $user,
+        public bool $do_set
+    ) {
         parent::__construct();
-
-        $this->image_id = $image_id;
-        $this->user = $user;
-        $this->do_set = $do_set;
     }
 }
 
-class Favorites extends Extension
+final class Favorites extends Extension
 {
+    public const KEY = "favorites";
     /** @var FavoritesTheme */
     protected Themelet $theme;
 
@@ -32,12 +30,11 @@ class Favorites extends Extension
 
     public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
     {
-        global $database, $user;
-        if (!$user->is_anonymous()) {
-            $user_id = $user->id;
+        if (Ctx::$user->can(FavouritesPermission::EDIT_FAVOURITES)) {
+            $user_id = Ctx::$user->id;
             $image_id = $event->image->id;
 
-            $is_favorited = $database->get_one(
+            $is_favorited = Ctx::$database->get_one(
                 "SELECT COUNT(*) AS ct FROM user_favorites WHERE user_id = :user_id AND image_id = :image_id",
                 ["user_id" => $user_id, "image_id" => $image_id]
             ) > 0;
@@ -60,22 +57,15 @@ class Favorites extends Extension
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
-        if ($user->is_anonymous()) {
-            return;
-        } // FIXME: proper permissions
-
-        if ($event->page_matches("favourite/add/{image_id}", method: "POST")) {
+        if ($event->page_matches("favourite/add/{image_id}", method: "POST", permission: FavouritesPermission::EDIT_FAVOURITES)) {
             $image_id = $event->get_iarg('image_id');
-            send_event(new FavoriteSetEvent($image_id, $user, true));
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link("post/view/$image_id"));
+            send_event(new FavoriteSetEvent($image_id, Ctx::$user, true));
+            Ctx::$page->set_redirect(make_link("post/view/$image_id"));
         }
-        if ($event->page_matches("favourite/remove/{image_id}", method: "POST")) {
+        if ($event->page_matches("favourite/remove/{image_id}", method: "POST", permission: FavouritesPermission::EDIT_FAVOURITES)) {
             $image_id = $event->get_iarg('image_id');
-            send_event(new FavoriteSetEvent($image_id, $user, false));
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link("post/view/$image_id"));
+            send_event(new FavoriteSetEvent($image_id, Ctx::$user, false));
+            Ctx::$page->set_redirect(make_link("post/view/$image_id"));
         }
     }
 
@@ -85,34 +75,34 @@ class Favorites extends Extension
         $i_days_old = ((time() - \Safe\strtotime($event->display_user->join_date)) / 86400) + 1;
         $h_favorites_rate = sprintf("%.1f", ($i_favorites_count / $i_days_old));
         $favorites_link = search_link(["favorited_by={$event->display_user->name}"]);
-        $event->add_part("<a href='$favorites_link'>Posts favorited</a>: $i_favorites_count, $h_favorites_rate per day");
+        $event->add_part(emptyHTML(
+            A(["href" => $favorites_link], "Posts favorited"),
+            ": $i_favorites_count, $h_favorites_rate per day"
+        ));
     }
 
     public function onImageInfoSet(ImageInfoSetEvent $event): void
     {
-        global $user;
         $action = $event->get_param("favorite_action");
         if (
-            $user->can(Permissions::EDIT_FAVOURITES) &&
+            Ctx::$user->can(FavouritesPermission::EDIT_FAVOURITES) &&
             !is_null($action) &&
-            ($action == "set" || $action == "unset")
+            ($action === "set" || $action === "unset")
         ) {
-            send_event(new FavoriteSetEvent($event->image->id, $user, $action == "set"));
+            send_event(new FavoriteSetEvent($event->image->id, Ctx::$user, $action === "set"));
         }
     }
 
     public function onFavoriteSet(FavoriteSetEvent $event): void
     {
-        global $user;
-        $this->add_vote($event->image_id, $user->id, $event->do_set);
+        $this->add_vote($event->image_id, Ctx::$user->id, $event->do_set);
     }
 
     // FIXME: this should be handled by the foreign key. Check that it
     // is, and then remove this
     public function onImageDeletion(ImageDeletionEvent $event): void
     {
-        global $database;
-        $database->execute("DELETE FROM user_favorites WHERE image_id=:image_id", ["image_id" => $event->image->id]);
+        Ctx::$database->execute("DELETE FROM user_favorites WHERE image_id=:image_id", ["image_id" => $event->image->id]);
     }
 
     public function onParseLinkTemplate(ParseLinkTemplateEvent $event): void
@@ -122,10 +112,7 @@ class Favorites extends Extension
 
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
-        global $user;
-
-        $username = url_escape($user->name);
-        $event->add_link("My Favorites", search_link(["favorited_by=$username"]), 20);
+        $event->add_link("My Favorites", search_link(["favorited_by=" . Ctx::$user->name]), 20);
     }
 
     public function onSearchTermParse(SearchTermParseEvent $event): void
@@ -156,52 +143,38 @@ class Favorites extends Extension
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        global $user;
-        if ($event->parent == "posts") {
-            $event->add_nav_link("posts_favorites", new Link("post/list/favorited_by={$user->name}/1"), "My Favorites");
-        }
-
-        if ($event->parent === "user") {
-            if ($user->can(Permissions::MANAGE_ADMINTOOLS)) {
-                $username = url_escape($user->name);
-                $event->add_nav_link("favorites", new Link("post/list/favorited_by=$username/1"), "My Favorites");
-            }
+        if ($event->parent === "posts") {
+            $event->add_nav_link(search_link(["favorited_by=" . Ctx::$user->name]), "My Favorites");
         }
     }
 
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
-        global $user;
-
-        if (!$user->is_anonymous()) {
-            $event->add_action("bulk_favorite", "Favorite");
-            $event->add_action("bulk_unfavorite", "Un-Favorite");
-        }
+        $event->add_action("favorite", "Favorite", permission: FavouritesPermission::EDIT_FAVOURITES);
+        $event->add_action("unfavorite", "Un-Favorite", permission: FavouritesPermission::EDIT_FAVOURITES);
     }
 
     public function onBulkAction(BulkActionEvent $event): void
     {
-        global $page, $user;
-
         switch ($event->action) {
-            case "bulk_favorite":
-                if (!$user->is_anonymous()) {
+            case "favorite":
+                if (Ctx::$user->can(FavouritesPermission::EDIT_FAVOURITES)) {
                     $total = 0;
                     foreach ($event->items as $image) {
-                        send_event(new FavoriteSetEvent($image->id, $user, true));
+                        send_event(new FavoriteSetEvent($image->id, Ctx::$user, true));
                         $total++;
                     }
-                    $page->flash("Added $total items to favorites");
+                    $event->log_action("Added $total items to favorites");
                 }
                 break;
-            case "bulk_unfavorite":
-                if (!$user->is_anonymous()) {
+            case "unfavorite":
+                if (Ctx::$user->can(FavouritesPermission::EDIT_FAVOURITES)) {
                     $total = 0;
                     foreach ($event->items as $image) {
-                        send_event(new FavoriteSetEvent($image->id, $user, false));
+                        send_event(new FavoriteSetEvent($image->id, Ctx::$user, false));
                         $total++;
                     }
-                    $page->flash("Removed $total items from favorites");
+                    $event->log_action("Removed $total items from favorites");
                 }
                 break;
         }
@@ -211,7 +184,7 @@ class Favorites extends Extension
     {
         global $database;
 
-        if ($this->get_version("ext_favorites_version") < 1) {
+        if ($this->get_version() < 1) {
             $database->execute("ALTER TABLE images ADD COLUMN favorites INTEGER NOT NULL DEFAULT 0");
             $database->execute("CREATE INDEX images__favorites ON images(favorites)");
             $database->create_table("user_favorites", "
@@ -223,18 +196,18 @@ class Favorites extends Extension
 					FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
 					");
             $database->execute("CREATE INDEX user_favorites_image_id_idx ON user_favorites(image_id)", []);
-            $this->set_version("ext_favorites_version", 2);
+            $this->set_version(2);
         }
 
-        if ($this->get_version("ext_favorites_version") < 2) {
-            log_info("favorites", "Cleaning user favourites");
+        if ($this->get_version() < 2) {
+            Log::info("favorites", "Cleaning user favourites");
             $database->execute("DELETE FROM user_favorites WHERE user_id NOT IN (SELECT id FROM users)");
             $database->execute("DELETE FROM user_favorites WHERE image_id NOT IN (SELECT id FROM images)");
 
-            log_info("favorites", "Adding foreign keys to user favourites");
+            Log::info("favorites", "Adding foreign keys to user favourites");
             $database->execute("ALTER TABLE user_favorites ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE;");
             $database->execute("ALTER TABLE user_favorites ADD FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE;");
-            $this->set_version("ext_favorites_version", 2);
+            $this->set_version(2);
         }
     }
 

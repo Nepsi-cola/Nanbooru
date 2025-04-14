@@ -4,28 +4,20 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class LogNet extends Extension
+final class LogNet extends Extension
 {
+    public const KEY = "log_net";
     private int $count = 0;
-
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_string("log_net_host", "127.0.0.1:35353");
-    }
 
     public function onLog(LogEvent $event): void
     {
-        global $user;
-
         if ($event->priority > 10) {
             $this->count++;
             if ($this->count < 10) {
-                // TODO: colour based on event->priority
-                $username = ($user && $user->name) ? $user->name : "Anonymous";
-                $str = sprintf("%-15s %-10s: %s", get_real_ip(), $username, $event->message);
+                $username = isset(Ctx::$user) ? Ctx::$user->name : "Anonymous";
+                $str = sprintf("%-15s %-10s: %s", Network::get_real_ip(), $username, $event->message);
                 $this->msg($str);
-            } elseif ($this->count == 10) {
+            } elseif ($this->count === 10) {
                 $this->msg('suppressing flood, check the web log');
             }
         }
@@ -33,8 +25,7 @@ class LogNet extends Extension
 
     private function msg(string $data): void
     {
-        global $config;
-        $host = $config->get_string("log_net_host");
+        $host = Ctx::$config->get(LogNetConfig::HOST);
 
         if (!$host) {
             return;
@@ -44,7 +35,7 @@ class LogNet extends Extension
             $parts = explode(":", $host);
             $host = $parts[0];
             $port = (int)$parts[1];
-            $fp = fsockopen("udp://$host", $port, $errno, $errstr);
+            $fp = fsockopen("udp://$host", $port);
             if (!$fp) {
                 return;
             }

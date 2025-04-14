@@ -4,28 +4,27 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\rawHTML;
-
-class Notes extends Extension
+/**
+ * @phpstan-type NoteHistory array{image_id:int,note_id:int,review_id:int,user_name:string,note:string,date:string}
+ * @phpstan-type Note array{id:int,x1:int,y1:int,height:int,width:int,note:string}
+ */
+final class Notes extends Extension
 {
+    public const KEY = "notes";
     /** @var NotesTheme */
     protected Themelet $theme;
 
     public function onInitExt(InitExtEvent $event): void
     {
-        global $config;
         Image::$prop_types["notes"] = ImagePropType::INT;
-        $config->set_default_int("notesNotesPerPage", 20);
-        $config->set_default_int("notesRequestsPerPage", 20);
-        $config->set_default_int("notesHistoriesPerPage", 20);
     }
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
-        global $config, $database;
+        $database = Ctx::$database;
 
         // shortcut to latest
-        if ($this->get_version("ext_notes_version") < 1) {
+        if ($this->get_version() < 1) {
             $database->execute("ALTER TABLE images ADD COLUMN notes INTEGER NOT NULL DEFAULT 0");
             $database->create_table("notes", "
 					id SCORE_AIPK,
@@ -73,28 +72,28 @@ class Notes extends Extension
 					");
             $database->execute("CREATE INDEX note_histories_image_id_idx ON note_histories(image_id)", []);
 
-            $this->set_version("ext_notes_version", 1);
+            $this->set_version(1);
         }
     }
 
     public function onPageNavBuilding(PageNavBuildingEvent $event): void
     {
-        $event->add_nav_link("note", new Link('note/requests'), "Notes");
+        $event->add_nav_link(make_link('note/requests'), "Notes", category: "note");
     }
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        if ($event->parent == "note") {
-            $event->add_nav_link("note_requests", new Link('note/requests'), "Requests");
-            $event->add_nav_link("note_list", new Link('note/list'), "List");
-            $event->add_nav_link("note_updated", new Link('note/updated'), "Updates");
-            $event->add_nav_link("note_help", new Link('ext_doc/notes'), "Help");
+        if ($event->parent === "note") {
+            $event->add_nav_link(make_link('note/requests'), "Requests");
+            $event->add_nav_link(make_link('note/list'), "List");
+            $event->add_nav_link(make_link('note/updated'), "Updates");
+            $event->add_nav_link(make_link('ext_doc/notes'), "Help");
         }
     }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
+        $page = Ctx::$page;
         if ($event->page_matches("note/list", paged: true)) {
             $this->get_notes_list($event->get_iarg('page_num', 1) - 1); // This should show images like post/list but i don't know how do that.
         }
@@ -110,47 +109,40 @@ class Notes extends Extension
         if ($event->page_matches("note_history/{image_id}", paged: true)) {
             $this->get_image_history($event->get_iarg('image_id'), $event->get_iarg('page_num', 1) - 1);
         }
-        if ($event->page_matches("note/revert/{noteID}/{reviewID}", permission: Permissions::NOTES_EDIT)) {
+        if ($event->page_matches("note/revert/{noteID}/{reviewID}", permission: NotesPermission::EDIT)) {
             $noteID = $event->get_iarg('noteID');
             $reviewID = $event->get_iarg('reviewID');
             $this->revert_history($noteID, $reviewID);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("note/updated"));
         }
-        if ($event->page_matches("note/add_request", permission: Permissions::NOTES_REQUEST)) {
-            $image_id = int_escape($event->req_POST("image_id"));
+        if ($event->page_matches("note/add_request", permission: NotesPermission::REQUEST)) {
+            $image_id = int_escape($event->POST->req("image_id"));
             $this->add_note_request($image_id);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("post/view/$image_id"));
         }
-        if ($event->page_matches("note/nuke_requests", permission: Permissions::NOTES_ADMIN)) {
-            $image_id = int_escape($event->req_POST("image_id"));
+        if ($event->page_matches("note/nuke_requests", permission: NotesPermission::ADMIN)) {
+            $image_id = int_escape($event->POST->req("image_id"));
             $this->nuke_requests($image_id);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("post/view/$image_id"));
         }
-        if ($event->page_matches("note/create_note", permission: Permissions::NOTES_CREATE)) {
-            $page->set_mode(PageMode::DATA);
+        if ($event->page_matches("note/create_note", permission: NotesPermission::CREATE)) {
             $note_id = $this->add_new_note();
-            $page->set_data(\Safe\json_encode([
+            $page->set_data(MimeType::JSON, \Safe\json_encode([
                 'status' => 'success',
                 'note_id' => $note_id,
             ]));
         }
-        if ($event->page_matches("note/update_note", permission: Permissions::NOTES_EDIT)) {
-            $page->set_mode(PageMode::DATA);
+        if ($event->page_matches("note/update_note", permission: NotesPermission::EDIT)) {
             $this->update_note();
-            $page->set_data(\Safe\json_encode(['status' => 'success']));
+            $page->set_data(MimeType::JSON, \Safe\json_encode(['status' => 'success']));
         }
-        if ($event->page_matches("note/delete_note", permission: Permissions::NOTES_ADMIN)) {
-            $page->set_mode(PageMode::DATA);
+        if ($event->page_matches("note/delete_note", permission: NotesPermission::ADMIN)) {
             $this->delete_note();
-            $page->set_data(\Safe\json_encode(['status' => 'success']));
+            $page->set_data(MimeType::JSON, \Safe\json_encode(['status' => 'success']));
         }
-        if ($event->page_matches("note/nuke_notes", permission: Permissions::NOTES_ADMIN)) {
-            $image_id = int_escape($event->req_POST("image_id"));
+        if ($event->page_matches("note/nuke_notes", permission: NotesPermission::ADMIN)) {
+            $image_id = int_escape($event->POST->req("image_id"));
             $this->nuke_notes($image_id);
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(make_link("post/view/$image_id"));
         }
     }
@@ -160,45 +152,33 @@ class Notes extends Extension
         $event->add_disallow("note_history");
     }
 
-
-    /*
-     * HERE WE LOAD THE NOTES IN THE IMAGE
-     */
     public function onDisplayingImage(DisplayingImageEvent $event): void
     {
-        global $page, $user;
-
-        //display form on image event
-        $notes = $this->get_notes($event->image->id);
-        $this->theme->display_note_system($page, $event->image->id, $notes, $user->can(Permissions::NOTES_ADMIN), $user->can(Permissions::NOTES_EDIT));
+        $this->theme->display_note_system(
+            $event->image->id,
+            $this->get_notes($event->image->id),
+            Ctx::$user->can(NotesPermission::ADMIN),
+            Ctx::$user->can(NotesPermission::EDIT)
+        );
     }
 
-
-    /*
-     * HERE WE ADD THE BUTTONS ON SIDEBAR
-     */
     public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::NOTES_CREATE)) {
+        if (Ctx::$user->can(NotesPermission::CREATE)) {
             $event->add_part($this->theme->note_button($event->image->id));
 
-            if ($user->can(Permissions::NOTES_ADMIN)) {
+            if (Ctx::$user->can(NotesPermission::ADMIN)) {
                 $event->add_part($this->theme->nuke_notes_button($event->image->id));
                 $event->add_part($this->theme->nuke_requests_button($event->image->id));
             }
         }
-        if ($user->can(Permissions::NOTES_REQUEST)) {
+        if (Ctx::$user->can(NotesPermission::REQUEST)) {
             $event->add_part($this->theme->request_button($event->image->id));
         }
 
         $event->add_button("View Note History", "note_history/{$event->image->id}", 20);
     }
 
-
-    /*
-     * HERE WE ADD QUERYLETS TO ADD SEARCH SYSTEM
-     */
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^note[=|:](.*)$/i")) {
@@ -224,17 +204,12 @@ class Notes extends Extension
         }
     }
 
-
     /**
-     * HERE WE GET ALL NOTES FOR DISPLAYED IMAGE.
-     *
      * @return array<string, mixed>
      */
     private function get_notes(int $imageID): array
     {
-        global $database;
-
-        return $database->get_all("
+        return Ctx::$database->get_all("
             SELECT *
             FROM notes
             WHERE enable = :enable AND image_id = :image_id
@@ -242,13 +217,9 @@ class Notes extends Extension
         ", ['enable' => '1', 'image_id' => $imageID]);
     }
 
-
-    /*
-     * HERE WE ADD A NOTE TO DATABASE
-     */
     private function add_new_note(): int
     {
-        global $database, $user;
+        global $database;
 
         $note = \Safe\json_decode(\Safe\file_get_contents('php://input'), true);
 
@@ -259,8 +230,8 @@ class Notes extends Extension
             [
                 'enable' => 1,
                 'image_id' => $note['image_id'],
-                'user_id' => $user->id,
-                'user_ip' => get_real_ip(),
+                'user_id' => Ctx::$user->id,
+                'user_ip' => Network::get_real_ip(),
                 'x1' => $note['x1'],
                 'y1' => $note['y1'],
                 'height' => $note['height'],
@@ -271,7 +242,7 @@ class Notes extends Extension
 
         $noteID = $database->get_last_insert_id('notes_id_seq');
 
-        log_info("notes", "Note added {$noteID} by {$user->name}");
+        Log::info("notes", "Note added {$noteID} by " . Ctx::$user->name);
 
         $database->execute("UPDATE images SET notes=(SELECT COUNT(*) FROM notes WHERE image_id=:id) WHERE id=:id", ['id' => $note['image_id']]);
 
@@ -291,34 +262,26 @@ class Notes extends Extension
 
     private function add_note_request(int $image_id): void
     {
-        global $database, $user;
-
-        $user_id = $user->id;
-
-        $database->execute(
+        Ctx::$database->execute(
             "
 				INSERT INTO note_request (image_id, user_id, date)
 				VALUES (:image_id, :user_id, now())",
-            ['image_id' => $image_id, 'user_id' => $user_id]
+            ['image_id' => $image_id, 'user_id' => Ctx::$user->id]
         );
 
-        $resultID = $database->get_last_insert_id('note_request_id_seq');
+        $resultID = Ctx::$database->get_last_insert_id('note_request_id_seq');
 
-        log_info("notes", "Note requested {$resultID} by {$user->name}");
+        Log::info("notes", "Note requested {$resultID} by " . Ctx::$user->name);
     }
 
     private function update_note(): void
     {
-        global $database;
-
         $note = \Safe\json_decode(\Safe\file_get_contents('php://input'), true);
-
-        // validate parameters
         if (empty($note['note'])) {
             return;
         }
 
-        $database->execute("
+        Ctx::$database->execute("
 			UPDATE notes
 			SET x1 = :x1, y1 = :y1, height = :height, width = :width, note = :note
 			WHERE image_id = :image_id AND id = :note_id", $note);
@@ -328,47 +291,43 @@ class Notes extends Extension
 
     private function delete_note(): void
     {
-        global $user, $database;
-
         $note = \Safe\json_decode(\Safe\file_get_contents('php://input'), true);
-        $database->execute("
+        Ctx::$database->execute("
 			UPDATE notes SET enable = :enable
 			WHERE image_id = :image_id AND id = :id
 		", ['enable' => 0, 'image_id' => $note["image_id"], 'id' => $note["note_id"]]);
 
-        log_info("notes", "Note deleted {$note["note_id"]} by {$user->name}");
+        Log::info("notes", "Note deleted {$note["note_id"]} by " . Ctx::$user->name);
     }
 
     private function nuke_notes(int $image_id): void
     {
-        global $database, $user;
-        $database->execute("DELETE FROM notes WHERE image_id = :image_id", ['image_id' => $image_id]);
-        log_info("notes", "Notes deleted from {$image_id} by {$user->name}");
+        Ctx::$database->execute("DELETE FROM notes WHERE image_id = :image_id", ['image_id' => $image_id]);
+        Log::info("notes", "Notes deleted from {$image_id} by " . Ctx::$user->name);
     }
 
     private function nuke_requests(int $image_id): void
     {
-        global $database, $user;
-
-        $database->execute("DELETE FROM note_request WHERE image_id = :image_id", ['image_id' => $image_id]);
-
-        log_info("notes", "Requests deleted from {$image_id} by {$user->name}");
+        Ctx::$database->execute("DELETE FROM note_request WHERE image_id = :image_id", ['image_id' => $image_id]);
+        Log::info("notes", "Requests deleted from {$image_id} by " . Ctx::$user->name);
     }
 
     private function get_notes_list(int $pageNumber): void
     {
-        global $database, $config;
+        global $database;
 
-        $notesPerPage = $config->get_int('notesNotesPerPage');
+        $notesPerPage = Ctx::$config->get(NotesConfig::NOTES_PER_PAGE);
         $totalPages = (int) ceil($database->get_one("SELECT COUNT(DISTINCT image_id) FROM notes") / $notesPerPage);
 
-        //$result = $database->get_all("SELECT * FROM pool_images WHERE pool_id=:pool_id", ['pool_id'=>$poolID]);
         $image_ids = $database->get_col(
             "
 			SELECT DISTINCT image_id
-			FROM notes
-			WHERE enable = :enable
-			ORDER BY date DESC, id DESC LIMIT :limit OFFSET :offset",
+			FROM (
+			    SELECT * FROM notes
+			    WHERE enable = :enable
+			    ORDER BY date DESC, id DESC
+			) AS subquery
+			LIMIT :limit OFFSET :offset",
             ['enable' => 1, 'offset' => $pageNumber * $notesPerPage, 'limit' => $notesPerPage]
         );
 
@@ -382,17 +341,19 @@ class Notes extends Extension
 
     private function get_notes_requests(int $pageNumber): void
     {
-        global $config, $database;
+        global $database;
 
-        $requestsPerPage = $config->get_int('notesRequestsPerPage');
-
-        //$result = $database->get_all("SELECT * FROM pool_images WHERE pool_id=:pool_id", ['pool_id'=>$poolID]);
+        $requestsPerPage = Ctx::$config->get(NotesConfig::REQUESTS_PER_PAGE);
 
         $result = $database->execute(
             "
 				SELECT DISTINCT image_id
-				FROM note_request
-				ORDER BY date DESC, id DESC LIMIT :limit OFFSET :offset",
+				FROM (
+				    SELECT *
+					FROM note_request
+				    ORDER BY date DESC, id DESC
+				) AS subquery
+				LIMIT :limit OFFSET :offset",
             ["offset" => $pageNumber * $requestsPerPage, "limit" => $requestsPerPage]
         );
 
@@ -408,7 +369,7 @@ class Notes extends Extension
 
     private function add_history(int $noteEnable, int $noteID, int $imageID, int $noteX1, int $noteY1, int $noteHeight, int $noteWidth, string $noteText): void
     {
-        global $user, $database;
+        global $database;
 
         $reviewID = $database->get_one("SELECT COUNT(*) FROM note_histories WHERE note_id = :note_id", ['note_id' => $noteID]);
         $reviewID = $reviewID + 1;
@@ -423,8 +384,8 @@ class Notes extends Extension
                 'note_id' => $noteID,
                 'review_id' => $reviewID,
                 'image_id' => $imageID,
-                'user_id' => $user->id,
-                'user_ip' => get_real_ip(),
+                'user_id' => Ctx::$user->id,
+                'user_ip' => Network::get_real_ip(),
                 'x1' => $noteX1,
                 'y1' => $noteY1,
                 'height' => $noteHeight,
@@ -436,17 +397,18 @@ class Notes extends Extension
 
     private function get_histories(int $pageNumber): void
     {
-        global $config, $database;
+        global $database;
 
-        $historiesPerPage = $config->get_int('notesHistoriesPerPage');
+        $historiesPerPage = Ctx::$config->get(NotesConfig::HISTORIES_PER_PAGE);
 
         //ORDER BY IMAGE & DATE
         $histories = $database->get_all(
-            "SELECT h.note_id, h.review_id, h.image_id, h.date, h.note, u.name AS user_name " .
-            "FROM note_histories AS h " .
-            "INNER JOIN users AS u " .
-            "ON u.id = h.user_id " .
-            "ORDER BY date DESC, note_id DESC LIMIT :limit OFFSET :offset",
+            "SELECT h.note_id, h.review_id, h.image_id, h.date, h.note, u.name AS user_name
+            FROM note_histories AS h
+            INNER JOIN users AS u
+            ON u.id = h.user_id
+            ORDER BY date DESC, note_id DESC
+            LIMIT :limit OFFSET :offset",
             ['offset' => $pageNumber * $historiesPerPage, 'limit' => $historiesPerPage]
         );
 
@@ -457,42 +419,54 @@ class Notes extends Extension
 
     private function get_history(int $noteID, int $pageNumber): void
     {
-        global $config, $database;
+        global $database;
 
-        $historiesPerPage = $config->get_int('notesHistoriesPerPage');
+        $historiesPerPage = Ctx::$config->get(NotesConfig::HISTORIES_PER_PAGE);
 
         $histories = $database->get_all(
-            "SELECT h.note_id, h.review_id, h.image_id, h.date, h.note, u.name AS user_name " .
-            "FROM note_histories AS h " .
-            "INNER JOIN users AS u " .
-            "ON u.id = h.user_id " .
-            "WHERE note_id = :note_id " .
-            "ORDER BY date DESC, note_id DESC LIMIT :limit OFFSET :offset",
+            "SELECT h.note_id, h.review_id, h.image_id, h.date, h.note, u.name AS user_name
+            FROM note_histories AS h
+            INNER JOIN users AS u
+            ON u.id = h.user_id
+            WHERE note_id = :note_id
+            ORDER BY date DESC, note_id DESC
+            LIMIT :limit OFFSET :offset",
             ['note_id' => $noteID, 'offset' => $pageNumber * $historiesPerPage, 'limit' => $historiesPerPage]
         );
 
-        $totalPages = (int) ceil($database->get_one("SELECT COUNT(*) FROM note_histories WHERE note_id = :note_id", ['note_id' => $noteID]) / $historiesPerPage);
+        $count = $database->get_one("SELECT COUNT(*) FROM note_histories WHERE note_id = :note_id", ['note_id' => $noteID]);
+        if ($count === 0) {
+            throw new HistoryNotFound("No note history for Note #$noteID was found.");
+        }
+        $totalPages = (int) ceil($count / $historiesPerPage);
 
         $this->theme->display_history($histories, $pageNumber + 1, $totalPages);
     }
 
     private function get_image_history(int $imageID, int $pageNumber): void
     {
-        global $config, $database;
+        $historiesPerPage = Ctx::$config->get(NotesConfig::HISTORIES_PER_PAGE);
 
-        $historiesPerPage = $config->get_int('notesHistoriesPerPage');
-
-        $histories = $database->get_all(
-            "SELECT h.note_id, h.review_id, h.image_id, h.date, h.note, u.name AS user_name " .
-            "FROM note_histories AS h " .
-            "INNER JOIN users AS u " .
-            "ON u.id = h.user_id " .
-            "WHERE image_id = :image_id " .
-            "ORDER BY date DESC, note_id DESC LIMIT :limit OFFSET :offset",
+        /** @var array<NoteHistory> $histories */
+        $histories = Ctx::$database->get_all(
+            "SELECT h.note_id, h.review_id, h.image_id, h.date, h.note, u.name AS user_name
+            FROM note_histories AS h
+            INNER JOIN users AS u
+            ON u.id = h.user_id
+            WHERE image_id = :image_id
+            ORDER BY date DESC, note_id DESC
+            LIMIT :limit OFFSET :offset",
             ['image_id' => $imageID, 'offset' => $pageNumber * $historiesPerPage, 'limit' => $historiesPerPage]
         );
 
-        $totalPages = (int) ceil($database->get_one("SELECT COUNT(*) FROM note_histories WHERE image_id = :image_id", ['image_id' => $imageID]) / $historiesPerPage);
+        $count = Ctx::$database->get_one(
+            "SELECT COUNT(*) FROM note_histories WHERE image_id = :image_id",
+            ['image_id' => $imageID]
+        );
+        if ($count === 0) {
+            throw new HistoryNotFound("No note history for Post #$imageID was found.");
+        }
+        $totalPages = (int) ceil($count / $historiesPerPage);
 
         $this->theme->display_image_history($histories, $imageID, $pageNumber + 1, $totalPages);
     }
@@ -504,7 +478,10 @@ class Notes extends Extension
     {
         global $database;
 
-        $history = $database->get_row("SELECT * FROM note_histories WHERE note_id = :note_id AND review_id = :review_id", ['note_id' => $noteID, 'review_id' => $reviewID]);
+        $history = $database->get_row(
+            "SELECT * FROM note_histories WHERE note_id = :note_id AND review_id = :review_id",
+            ['note_id' => $noteID, 'review_id' => $reviewID]
+        );
 
         $noteEnable = $history['note_enable'];
         $noteID = $history['note_id'];

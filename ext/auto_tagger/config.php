@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class AutoTaggerConfig extends ConfigGroup
+final class AutoTaggerConfig extends ConfigGroup
 {
-    public const VERSION = "ext_auto_tagger_ver";
+    public const KEY = "auto_tagger";
+
+    #[ConfigMeta("Items per page", ConfigType::INT, default: 30)]
     public const ITEMS_PER_PAGE = "auto_tagger_items_per_page";
 }

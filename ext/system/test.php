@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class SystemTest extends ShimmiePHPUnitTestCase
+final class SystemTest extends ShimmiePHPUnitTestCase
 {
     public function testView(): void
     {
-        global $page;
-        $this->get_page("system");
-        $this->assertEquals(PageMode::REDIRECT, $page->mode);
+        $page = self::get_page("system");
+        self::assertEquals(PageMode::REDIRECT, $page->mode);
     }
 }

@@ -8,42 +8,32 @@ require_once "events/upload_common_building_event.php";
 require_once "events/upload_specific_building_event.php";
 require_once "events/upload_header_building_event.php";
 
+use function MicroHTML\{A, BR, DIV, INPUT, NOSCRIPT, P, SCRIPT, SMALL, SPAN, emptyHTML};
+
 use MicroHTML\HTMLElement;
 
-use function MicroHTML\{TABLE,TR,TH,TD};
-use function MicroHTML\SMALL;
-use function MicroHTML\rawHTML;
-use function MicroHTML\INPUT;
-use function MicroHTML\emptyHTML;
-use function MicroHTML\NOSCRIPT;
-use function MicroHTML\DIV;
-use function MicroHTML\BR;
-use function MicroHTML\A;
-use function MicroHTML\SPAN;
-use function MicroHTML\P;
+use function MicroHTML\{TABLE, TD, TH, TR};
 
 class UploadTheme extends Themelet
 {
-    public function display_block(Page $page): void
+    public function display_block(): void
     {
-        $b = new Block("Upload", $this->build_upload_block(), "left", 20);
-        $b->is_content = false;
-        $page->add_block($b);
+        Ctx::$page->add_block(new Block("Upload", $this->build_upload_block(), "left", 20, is_content: false));
     }
 
-    public function display_full(Page $page): void
+    public function display_full(): void
     {
-        $page->add_block(new Block("Upload", rawHTML("Disk nearly full, uploads disabled"), "left", 20));
+        Ctx::$page->add_block(new Block("Upload", emptyHTML("Disk nearly full, uploads disabled"), "left", 20));
     }
 
-    public function display_page(Page $page): void
+    public function display_page(): void
     {
-        global $config, $page;
+        $limits = get_upload_limits();
 
-        $tl_enabled = ($config->get_string(UploadConfig::TRANSLOAD_ENGINE, "none") != "none");
-        $max_size = $config->get_int(UploadConfig::SIZE);
+        $tl_enabled = (Ctx::$config->get(UploadConfig::TRANSLOAD_ENGINE) !== "none");
+        $max_size = $limits['shm_filesize'];
         $max_kb = to_shorthand_int($max_size);
-        $max_total_size = parse_shorthand_int(ini_get('post_max_size') ?: "0");
+        $max_total_size = $limits['shm_post'];
         $max_total_kb = to_shorthand_int($max_total_size);
         $upload_list = $this->build_upload_list();
 
@@ -52,13 +42,17 @@ class UploadTheme extends Themelet
         foreach ($ucbe->get_parts() as $part) {
             $common_fields->appendChild($part);
         }
+        $captcha = Captcha::get_html(UploadPermission::SKIP_UPLOAD_CAPTCHA);
 
-        $form = SHM_FORM("upload", multipart: true, form_id: "file_upload");
+        $form = SHM_FORM(make_link("upload"), multipart: true, id: "file_upload");
         $form->appendChild(
             TABLE(
                 ["id" => "large_upload_form", "class" => "form"],
                 $common_fields,
                 $upload_list,
+                $captcha ? TR(
+                    TD(["colspan" => "7"], $captcha)
+                ) : null,
                 TR(
                     TD(["colspan" => "7"], INPUT(["id" => "uploadbutton", "type" => "submit", "value" => "Post"]))
                 ),
@@ -75,14 +69,15 @@ class UploadTheme extends Themelet
                 SPAN(["id" => "upload_size_tracker"], "0KB"),
                 ")"
             ),
-            rawHTML("<script>
+            SCRIPT("
             window.shm_max_size = $max_size;
             window.shm_max_total_size = $max_total_size;
-            </script>")
+            ")
         );
 
+        $page = Ctx::$page;
         $page->set_title("Upload");
-        $page->add_block(new NavBlock());
+        $this->display_navigation();
         $page->add_block(new Block("Upload", $html, "main", 20));
         if ($tl_enabled) {
             $page->add_block(new Block("Bookmarklets", $this->build_bookmarklets(), "left", 20));
@@ -91,10 +86,9 @@ class UploadTheme extends Themelet
 
     protected function build_upload_list(): HTMLElement
     {
-        global $config;
         $upload_list = emptyHTML();
-        $upload_count = $config->get_int(UploadConfig::COUNT);
-        $tl_enabled = ($config->get_string(UploadConfig::TRANSLOAD_ENGINE, "none") != "none");
+        $upload_count = Ctx::$config->get(UploadConfig::COUNT);
+        $tl_enabled = (Ctx::$config->get(UploadConfig::TRANSLOAD_ENGINE) !== "none");
         $accept = $this->get_accept();
 
         $headers = emptyHTML();
@@ -142,7 +136,7 @@ class UploadTheme extends Themelet
                         $tl_enabled ? INPUT([
                             "type" => "text",
                             "name" => "url{$i}",
-                            "value" => ($i == 0) ? @$_GET['url'] : null,
+                            "value" => ($i === 0) ? @$_GET['url'] : null,
                         ]) : null
                     ),
                     $specific_fields,
@@ -155,13 +149,13 @@ class UploadTheme extends Themelet
 
     protected function build_bookmarklets(): HTMLElement
     {
-        global $config;
-        $link = make_http(make_link("upload"));
-        $main_page = make_http(make_link());
-        $title = $config->get_string(SetupConfig::TITLE);
-        $max_size = $config->get_int(UploadConfig::SIZE);
+        $limits = get_upload_limits();
+        $link = make_link("upload")->asAbsolute();
+        $main_page = make_link()->asAbsolute();
+        $title = Ctx::$config->get(SetupConfig::TITLE);
+        $max_size = $limits['shm_filesize'];
         $max_kb = to_shorthand_int($max_size);
-        $delimiter = $config->get_bool(SetupConfig::NICE_URLS) ? '?' : '&amp;';
+        $delimiter = Url::are_niceurls_enabled() ? '?' : '&amp;';
 
         $js = 'javascript:(
             function() {
@@ -185,13 +179,13 @@ class UploadTheme extends Themelet
         )();';
         $html1 = P(
             A(["href" => $js], "Upload to $title"),
-            rawHTML(' (Drag &amp; drop onto your bookmarks toolbar, then click when looking at a post)')
+            emptyHTML(' (Drag & drop onto your bookmarks toolbar, then click when looking at a post)')
         );
 
         // Bookmarklet checks if shimmie supports ext. If not, won't upload to site/shows alert saying not supported.
         $supported_ext = join(" ", DataHandlerExtension::get_all_supported_exts());
 
-        $title = "Booru to " . $config->get_string(SetupConfig::TITLE);
+        $title = "Booru to " . Ctx::$config->get(SetupConfig::TITLE);
         // CA=0: Ask to use current or new tags | CA=1: Always use current tags | CA=2: Always use new tags
         $js = '
             javascript:
@@ -199,11 +193,11 @@ class UploadTheme extends Themelet
             var supext=&quot;'.$supported_ext.'&quot;;
             var maxsize=&quot;'.$max_kb.'&quot;;
             var CA=0;
-            void(document.body.appendChild(document.createElement(&quot;script&quot;)).src=&quot;'.make_http(get_base_href())."/ext/upload/bookmarklet.js".'&quot;)
+            void(document.body.appendChild(document.createElement(&quot;script&quot;)).src=&quot;'.Url::base()->asAbsolute()."/ext/upload/bookmarklet.js".'&quot;)
         ';
         $html2 = P(
             A(["href" => $js], $title),
-            rawHTML(" (Click when looking at a post page. Works on sites running Shimmie / Danbooru / Gelbooru. (This also grabs the tags / rating / source!))"),
+            emptyHTML(" (Click when looking at a post page. Works on sites running Shimmie / Danbooru / Gelbooru. (This also grabs the tags / rating / source!))"),
         );
 
         return emptyHTML($html1, $html2);
@@ -212,9 +206,9 @@ class UploadTheme extends Themelet
     /**
      * @param UploadResult[] $results
      */
-    public function display_upload_status(Page $page, array $results): void
+    public function display_upload_status(array $results): void
     {
-        global $user;
+        $page = Ctx::$page;
 
         /** @var UploadSuccess[] */
         $successes = array_filter($results, fn ($r) => is_a($r, UploadSuccess::class));
@@ -224,42 +218,41 @@ class UploadTheme extends Themelet
 
         if (count($errors) > 0) {
             $page->set_title("Upload Status");
-            $page->add_block(new NavBlock());
+            $this->display_navigation();
             foreach ($errors as $error) {
-                $page->add_block(new Block($error->name, rawHTML(format_text($error->error))));
+                $page->add_block(new Block($error->name, format_text($error->error)));
             }
-        } elseif (count($successes) == 0) {
+        } elseif (count($successes) === 0) {
             $page->set_title("No images uploaded");
-            $page->add_block(new NavBlock());
-            $page->add_block(new Block("No images uploaded", rawHTML("Upload attempted, but nothing succeeded and nothing failed?")));
-        } elseif (count($successes) == 1) {
-            $page->set_mode(PageMode::REDIRECT);
+            $this->display_navigation();
+            $page->add_block(new Block("No images uploaded", emptyHTML("Upload attempted, but nothing succeeded and nothing failed?")));
+        } elseif (count($successes) === 1) {
             $page->set_redirect(make_link("post/view/{$successes[0]->image_id}"));
             $page->add_http_header("X-Shimmie-Post-ID: " . $successes[0]->image_id);
         } else {
             $ids = join(",", array_reverse(array_map(fn ($s) => $s->image_id, $successes)));
-            $page->set_mode(PageMode::REDIRECT);
             $page->set_redirect(search_link(["id={$ids}"]));
         }
     }
 
     protected function build_upload_block(): HTMLElement
     {
-        global $config;
+        $limits = get_upload_limits();
 
         $accept = $this->get_accept();
 
-        $max_size = $config->get_int(UploadConfig::SIZE);
+        $max_size = $limits['shm_filesize'];
         $max_kb = to_shorthand_int($max_size);
-        $max_total_size = parse_shorthand_int(ini_get('post_max_size') ?: "0");
+        $max_total_size = $limits['shm_post'];
         $max_total_kb = to_shorthand_int($max_total_size);
 
         // <input type='hidden' name='max_file_size' value='$max_size' />
-        $form = SHM_FORM("upload", multipart: true);
+        $form = SHM_FORM(make_link("upload"), multipart: true);
         $form->appendChild(
             emptyHTML(
                 INPUT(["id" => "data[]", "name" => "data[]", "size" => "16", "type" => "file", "accept" => $accept, "multiple" => true]),
                 INPUT(["name" => "tags", "type" => "text", "placeholder" => "tagme", "class" => "autocomplete_tags", "required" => true]),
+                Captcha::get_html(UploadPermission::SKIP_UPLOAD_CAPTCHA),
                 INPUT(["type" => "submit", "value" => "Post"]),
             )
         );

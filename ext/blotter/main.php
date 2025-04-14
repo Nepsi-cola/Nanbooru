@@ -4,24 +4,22 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class Blotter extends Extension
+/**
+ * @phpstan-type BlotterEntry array{id:int,entry_date:string,entry_text:string,important:bool}
+ */
+final class Blotter extends Extension
 {
+    public const KEY = "blotter";
+    public const VERSION_KEY = "blotter_version";
+
     /** @var BlotterTheme */
     protected Themelet $theme;
 
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_int(BlotterConfig::RECENT, 5);
-        $config->set_default_string(BlotterConfig::COLOR, "FF0000");
-        $config->set_default_string(BlotterConfig::POSITION, "subheading");
-    }
-
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
-        global $database;
+        $database = Ctx::$database;
 
-        if ($this->get_version(BlotterConfig::VERSION) < 1) {
+        if ($this->get_version() < 1) {
             $database->create_table("blotter", "
                 id SCORE_AIPK,
                 entry_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -33,29 +31,20 @@ class Blotter extends Extension
                 "INSERT INTO blotter (entry_date, entry_text, important) VALUES (now(), :text, :important)",
                 ["text" => "Installed the blotter extension!", "important" => true]
             );
-            log_info("blotter", "Installed tables for blotter extension.");
-            $this->set_version(BlotterConfig::VERSION, 2);
+            Log::info("blotter", "Installed tables for blotter extension.");
+            $this->set_version(2);
         }
-        if ($this->get_version(BlotterConfig::VERSION) < 2) {
+        if ($this->get_version() < 2) {
             $database->standardise_boolean("blotter", "important");
-            $this->set_version(BlotterConfig::VERSION, 2);
+            $this->set_version(2);
         }
-    }
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Blotter");
-        $sb->add_int_option("blotter_recent", "<br />Number of recent entries to display: ");
-        $sb->add_text_option("blotter_color", "<br />Color of important updates: (ABCDEF format) ");
-        $sb->add_choice_option("blotter_position", ["Top of page" => "subheading", "In navigation bar" => "left"], "<br>Position: ");
     }
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        global $user;
         if ($event->parent === "system") {
-            if ($user->can(Permissions::BLOTTER_ADMIN)) {
-                $event->add_nav_link("blotter", new Link('blotter/editor'), "Blotter Editor");
+            if (Ctx::$user->can(BlotterPermission::ADMIN)) {
+                $event->add_nav_link(make_link('blotter/editor'), "Blotter Editor");
             }
         }
     }
@@ -63,39 +52,38 @@ class Blotter extends Extension
 
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::BLOTTER_ADMIN)) {
+        if (Ctx::$user->can(BlotterPermission::ADMIN)) {
             $event->add_link("Blotter Editor", make_link("blotter/editor"));
         }
     }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $database, $user;
-        if ($event->page_matches("blotter/editor", method: "GET", permission: Permissions::BLOTTER_ADMIN)) {
+        $database = Ctx::$database;
+        if ($event->page_matches("blotter/editor", method: "GET", permission: BlotterPermission::ADMIN)) {
+            /** @var BlotterEntry[] $entries */
             $entries = $database->get_all("SELECT * FROM blotter ORDER BY id DESC");
             $this->theme->display_editor($entries);
         }
-        if ($event->page_matches("blotter/add", method: "POST", permission: Permissions::BLOTTER_ADMIN)) {
-            $entry_text = $event->req_POST('entry_text');
-            $important = !is_null($event->get_POST('important'));
+        if ($event->page_matches("blotter/add", method: "POST", permission: BlotterPermission::ADMIN)) {
+            $entry_text = $event->POST->req('entry_text');
+            $important = !is_null($event->POST->get('important'));
             // Now insert into db:
             $database->execute(
                 "INSERT INTO blotter (entry_date, entry_text, important) VALUES (now(), :text, :important)",
                 ["text" => $entry_text, "important" => $important]
             );
-            log_info("blotter", "Added Message: $entry_text");
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link("blotter/editor"));
+            Log::info("blotter", "Added Message: $entry_text");
+            Ctx::$page->set_redirect(make_link("blotter/editor"));
         }
-        if ($event->page_matches("blotter/remove", method: "POST", permission: Permissions::BLOTTER_ADMIN)) {
-            $id = int_escape($event->req_POST('id'));
+        if ($event->page_matches("blotter/remove", method: "POST", permission: BlotterPermission::ADMIN)) {
+            $id = int_escape($event->POST->req('id'));
             $database->execute("DELETE FROM blotter WHERE id=:id", ["id" => $id]);
-            log_info("blotter", "Removed Entry #$id");
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link("blotter/editor"));
+            Log::info("blotter", "Removed Entry #$id");
+            Ctx::$page->set_redirect(make_link("blotter/editor"));
         }
         if ($event->page_matches("blotter/list", method: "GET")) {
+            /** @var BlotterEntry[] $entries */
             $entries = $database->get_all("SELECT * FROM blotter ORDER BY id DESC");
             $this->theme->display_blotter_page($entries);
         }
@@ -107,10 +95,10 @@ class Blotter extends Extension
 
     private function display_blotter(): void
     {
-        global $database, $config;
-        $entries = $database->get_all(
+        /** @var BlotterEntry[] $entries */
+        $entries = Ctx::$database->get_all(
             'SELECT * FROM blotter ORDER BY id DESC LIMIT :limit',
-            ["limit" => $config->get_int(BlotterConfig::RECENT, 5)]
+            ["limit" => Ctx::$config->get(BlotterConfig::RECENT)]
         );
         $this->theme->display_blotter($entries);
     }

@@ -13,12 +13,16 @@ declare(strict_types=1);
 namespace Shimmie2;
 
 chdir(dirname(dirname(__FILE__)));
-require_once "core/sanitize_php.php";
 require_once "vendor/autoload.php";
-require_once "tests/defines.php";
-require_once "core/sys_config.php";
-require_once "core/polyfills.php";
-require_once "core/util.php";
+
+define("DATABASE_DSN", getenv("TEST_DSN") ?: "sqlite::memory:");
+define("UNITTEST", true);
+define("EXTRA_EXTS", array_map(fn ($x) => str_replace("ext/", "", $x), \Safe\glob('ext/*')));
+define("VERSION", 'unit-tests');
+define("TIMEZONE", 'UTC');
+define("SECRET", "asdfghjkl");
+
+CliApp::$logLevel = LogLevel::CRITICAL->value;
 
 $_SERVER['SCRIPT_FILENAME'] = '/var/www/html/test/index.php';
 $_SERVER['DOCUMENT_ROOT'] = '/var/www/html';
@@ -28,33 +32,32 @@ if (file_exists("data/test-trace.json")) {
     unlink("data/test-trace.json");
 }
 
-global $cache, $config, $database, $user, $page, $_tracer;
+sanitize_php();
 _set_up_shimmie_environment();
-$tracer_enabled = true;
-$_tracer = new \EventTracer();
-$_tracer->begin("bootstrap");
-_load_core_files();
-$cache = loadCache(CACHE_DSN);
-$database = new Database(getenv("TEST_DSN") ?: "sqlite::memory:");
-create_dirs();
-create_tables($database);
-$config = new DatabaseConfig($database);
-_load_extension_files();
+Ctx::$tracer_enabled = true;
+Ctx::setTracer(new \EventTracer());
+Ctx::$tracer->begin("bootstrap");
+_load_ext_files();
+Ctx::setCache(load_cache(SysConfig::getCacheDsn()));
+Ctx::setDatabase(new Database(SysConfig::getDatabaseDsn()));
+Installer::create_dirs();
+Installer::create_tables(Ctx::$database);
+Ctx::setConfig(new DatabaseConfig(Ctx::$database));
+Ctx::$config->set(ThumbnailConfig::ENGINE, "static");
+Ctx::$config->set(SetupConfig::NICE_URLS, true);
 _load_theme_files();
-$page = new Page();
-_load_event_listeners();
-$config->set_string("thumb_engine", "static");
-$config->set_bool("nice_urls", true);
+Ctx::setPage(new Page());
+Ctx::setEventBus(new EventBus());
 send_event(new DatabaseUpgradeEvent());
 send_event(new InitExtEvent());
-$user = User::by_id($config->get_int("anon_id", 0));
+Ctx::setUser(User::get_anonymous());
 $userPage = new UserPage();
 $userPage->onUserCreation(new UserCreationEvent("demo", "demo", "demo", "demo@demo.com", false));
 $userPage->onUserCreation(new UserCreationEvent("test", "test", "test", "test@test.com", false));
 // in mysql, CREATE TABLE commits transactions, so after the database
 // upgrade we may or may not be inside a transaction depending on if
 // any tables were created.
-if ($database->is_transaction_open()) {
-    $database->commit();
+if (Ctx::$database->is_transaction_open()) {
+    Ctx::$database->commit();
 }
-$_tracer->end();
+Ctx::$tracer->end();

@@ -4,158 +4,161 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use MicroHTML\HTMLElement;
 use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\{InputInterface,InputArgument};
+use Symfony\Component\Console\Input\{InputArgument, InputInterface};
 use Symfony\Component\Console\Output\OutputInterface;
 
-class BulkActionBlockBuildingEvent extends Event
+final readonly class BulkAction
+{
+    public function __construct(
+        public string $action,
+        public string $button_text,
+        public ?string $access_key = null,
+        public string $confirmation_message = "",
+        public ?HTMLElement $block = null,
+        public int $position = 40,
+        public ?string $permission = null,
+    ) {
+    }
+}
+final class BulkActionBlockBuildingEvent extends Event
 {
     /**
-     * @var array<array{block:string,access_key:?string,confirmation_message:string,action:string,button_text:string,position:int}>
+     * @var array<BulkAction>
      */
     public array $actions = [];
     /** @var string[] */
     public array $search_terms = [];
 
-    public function add_action(string $action, string $button_text, ?string $access_key = null, string $confirmation_message = "", string $block = "", int $position = 40): void
-    {
+    public function add_action(
+        string $action,
+        string $button_text,
+        ?string $access_key = null,
+        string $confirmation_message = "",
+        ?HTMLElement $block = null,
+        int $position = 40,
+        ?string $permission = null,
+    ): void {
         if (!empty($access_key)) {
-            assert(strlen($access_key) == 1);
+            assert(strlen($access_key) === 1);
             foreach ($this->actions as $existing) {
-                if ($existing["access_key"] == $access_key) {
+                if ($existing->access_key === $access_key) {
                     throw new UserError("Access key $access_key is already in use");
                 }
             }
         }
 
-        $this->actions[] = [
-            "block" => $block,
-            "access_key" => $access_key,
-            "confirmation_message" => $confirmation_message,
-            "action" => $action,
-            "button_text" => $button_text,
-            "position" => $position
-        ];
+        $this->actions[] = new BulkAction(
+            $action,
+            $button_text,
+            $access_key,
+            $confirmation_message,
+            $block,
+            $position,
+            $permission,
+        );
     }
 }
 
-class BulkActionEvent extends Event
+final class BulkActionEvent extends Event
 {
-    public string $action;
-    public \Generator $items;
-    /** @var array<string, mixed> */
-    public array $params;
     public bool $redirect = true;
 
-    /**
-     * @param array<string, mixed> $params
-     */
-    public function __construct(string $action, \Generator $items, array $params)
-    {
+    public function __construct(
+        public string $action,
+        public \Generator $items,
+        public QueryArray $params
+    ) {
         parent::__construct();
-        $this->action = $action;
-        $this->items = $items;
-        $this->params = $params;
+    }
+
+    public function log_action(string $message): void
+    {
+        Log::debug(BulkActions::KEY, $message);
+        Ctx::$page->flash($message);
     }
 }
 
-class BulkActions extends Extension
+final class BulkActions extends Extension
 {
+    public const KEY = "bulk_actions";
     /** @var BulkActionsTheme */
     protected Themelet $theme;
 
     public function onPostListBuilding(PostListBuildingEvent $event): void
     {
-        global $page, $user;
-
         $babbe = new BulkActionBlockBuildingEvent();
         $babbe->search_terms = $event->search_terms;
 
         send_event($babbe);
 
-        if (sizeof($babbe->actions) == 0) {
+        $actions = $babbe->actions;
+        if (count($actions) === 0) {
             return;
         }
 
-        usort($babbe->actions, [$this, "sort_blocks"]);
-
-        $this->theme->display_selector($page, $babbe->actions, Tag::implode($event->search_terms));
-    }
-
-    public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
-    {
-        global $user;
-
-        if ($user->can(Permissions::DELETE_IMAGE)) {
-            $event->add_action("bulk_delete", "(D)elete", "d", "Delete selected images?", $this->theme->render_ban_reason_input(), 10);
-        }
-
-        if ($user->can(Permissions::BULK_EDIT_IMAGE_TAG)) {
-            $event->add_action(
-                "bulk_tag",
-                "Tag",
-                "t",
-                "",
-                $this->theme->render_tag_input(),
-                10
-            );
-        }
-
-        if ($user->can(Permissions::BULK_EDIT_IMAGE_SOURCE)) {
-            $event->add_action("bulk_source", "Set (S)ource", "s", "", $this->theme->render_source_input(), 10);
-        }
+        $actions = array_filter($actions, fn ($a) => $a->permission === null || Ctx::$user->can($a->permission));
+        usort($actions, $this->sort_blocks(...));
+        $this->theme->display_selector($actions, Tag::implode($event->search_terms));
     }
 
     public function onCliGen(CliGenEvent $event): void
     {
-        $event->app->register('bulk-action')
-            ->addArgument('action', InputArgument::REQUIRED)
-            ->addArgument('query', InputArgument::REQUIRED)
-            ->setDescription('Perform a bulk action on a given query')
-            ->setCode(function (InputInterface $input, OutputInterface $output): int {
-                $action = $input->getArgument('action');
-                $query = $input->getArgument('query');
-                $items = $this->yield_search_results($query);
-                log_info("bulk_actions", "Performing $action on $query");
-                send_event(new BulkActionEvent($action, $items, []));
-                return Command::SUCCESS;
-            });
+        foreach (send_event(new BulkActionBlockBuildingEvent())->actions as $action) {
+            $event->app->register("bulk:" . $action->action)
+                ->addArgument('query', InputArgument::REQUIRED)
+                ->setDescription($action->button_text)
+                ->setCode(function (InputInterface $input, OutputInterface $output) use ($action): int {
+                    $query = $input->getArgument('query');
+                    $items = $this->yield_search_results($query);
+                    Log::info("bulk_actions", "Performing {$action->action} on $query");
+                    send_event(new BulkActionEvent($action->action, $items, new QueryArray([])));
+                    return Command::SUCCESS;
+                });
+
+        }
+    }
+
+    public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
+    {
+        $event->add_action("delete", "(D)elete", "d", "Delete selected images?", $this->theme->render_ban_reason_input(), 10, permission: ImagePermission::DELETE_IMAGE);
+        $event->add_action("tag", "Tag", "t", "", $this->theme->render_tag_input(), 10, permission: BulkActionsPermission::BULK_EDIT_IMAGE_TAG);
+        $event->add_action("source", "Set (S)ource", "s", "", $this->theme->render_source_input(), 10, permission: BulkActionsPermission::BULK_EDIT_IMAGE_SOURCE);
     }
 
     public function onBulkAction(BulkActionEvent $event): void
     {
-        global $page, $user;
-
         switch ($event->action) {
-            case "bulk_delete":
-                if ($user->can(Permissions::DELETE_IMAGE)) {
+            case "delete":
+                if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
                     $i = $this->delete_posts($event->items);
-                    $page->flash("Deleted $i[0] items, totaling ".human_filesize($i[1]));
+                    $event->log_action("Deleted $i[0] items, totaling ".human_filesize($i[1]));
                 }
                 break;
-            case "bulk_tag":
+            case "tag":
                 if (!isset($event->params['bulk_tags'])) {
                     return;
                 }
-                if ($user->can(Permissions::BULK_EDIT_IMAGE_TAG)) {
+                if (Ctx::$user->can(BulkActionsPermission::BULK_EDIT_IMAGE_TAG)) {
                     $tags = $event->params['bulk_tags'];
                     $replace = false;
-                    if (isset($event->params['bulk_tags_replace']) &&  $event->params['bulk_tags_replace'] == "true") {
+                    if (isset($event->params['bulk_tags_replace']) &&  $event->params['bulk_tags_replace'] === "true") {
                         $replace = true;
                     }
 
                     $i = $this->tag_items($event->items, $tags, $replace);
-                    $page->flash("Tagged $i items");
+                    $event->log_action("Tagged $i items");
                 }
                 break;
-            case "bulk_source":
+            case "source":
                 if (!isset($event->params['bulk_source'])) {
                     return;
                 }
-                if ($user->can(Permissions::BULK_EDIT_IMAGE_SOURCE)) {
+                if (Ctx::$user->can(BulkActionsPermission::BULK_EDIT_IMAGE_SOURCE)) {
                     $source = $event->params['bulk_source'];
                     $i = $this->set_source($event->items, $source);
-                    $page->flash("Set source for $i items");
+                    $event->log_action("Set source for $i items");
                 }
                 break;
         }
@@ -163,29 +166,27 @@ class BulkActions extends Extension
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
-        if ($event->page_matches("bulk_action", method: "POST", permission: Permissions::PERFORM_BULK_ACTIONS)) {
-            $action = $event->req_POST('bulk_action');
+        if ($event->page_matches("bulk_action", method: "POST", permission: BulkActionsPermission::PERFORM_BULK_ACTIONS)) {
+            $action = $event->POST->req('bulk_action');
             $items = null;
-            if ($event->get_POST('bulk_selected_ids')) {
-                $data = json_decode($event->req_POST('bulk_selected_ids'));
-                if (!is_array($data) || empty($data)) {
+            if ($event->POST->get('bulk_selected_ids')) {
+                $data = json_decode($event->POST->req('bulk_selected_ids'));
+                if (!is_array($data) || count($data) === 0) {
                     throw new InvalidInput("No ids specified in bulk_selected_ids");
                 }
                 $items = $this->yield_items($data);
-            } elseif ($event->get_POST('bulk_query')) {
-                $query = $event->req_POST('bulk_query');
+            } elseif ($event->POST->get('bulk_query')) {
+                $query = $event->POST->req('bulk_query');
                 $items = $this->yield_search_results($query);
             } else {
                 throw new InvalidInput("No ids selected and no query present, cannot perform bulk operation on entire collection");
             }
 
-            shm_set_timeout(null);
+            Ctx::$event_bus->set_timeout(null);
             $bae = send_event(new BulkActionEvent($action, $items, $event->POST));
 
             if ($bae->redirect) {
-                $page->set_mode(PageMode::REDIRECT);
-                $page->set_redirect(referer_or(make_link()));
+                Ctx::$page->set_redirect(Url::referer_or());
             }
         }
     }
@@ -198,7 +199,7 @@ class BulkActions extends Extension
     {
         foreach ($data as $id) {
             $image = Image::by_id($id);
-            if ($image != null) {
+            if ($image !== null) {
                 yield $image;
             }
         }
@@ -214,12 +215,12 @@ class BulkActions extends Extension
     }
 
     /**
-     * @param array{position: int} $a
-     * @param array{position: int} $b
+     * @param BulkAction $a
+     * @param BulkAction $b
      */
-    private function sort_blocks(array $a, array $b): int
+    private function sort_blocks(BulkAction $a, BulkAction $b): int
     {
-        return $a["position"] - $b["position"];
+        return $a->position - $b->position;
     }
 
     /**
@@ -228,12 +229,11 @@ class BulkActions extends Extension
      */
     private function delete_posts(iterable $posts): array
     {
-        global $page;
         $total = 0;
         $size = 0;
         foreach ($posts as $post) {
             try {
-                if (Extension::is_enabled(ImageBanInfo::KEY) && isset($_POST['bulk_ban_reason'])) {
+                if (ImageBanInfo::is_enabled() && isset($_POST['bulk_ban_reason'])) {
                     $reason = $_POST['bulk_ban_reason'];
                     if ($reason) {
                         send_event(new AddImageHashBanEvent($post->hash, $reason));
@@ -243,7 +243,7 @@ class BulkActions extends Extension
                 $total++;
                 $size += $post->filesize;
             } catch (\Exception $e) {
-                $page->flash("Error while removing {$post->id}: " . $e->getMessage());
+                Ctx::$page->flash("Error while removing {$post->id}: " . $e->getMessage());
             }
         }
         return [$total, $size];
@@ -260,7 +260,9 @@ class BulkActions extends Extension
         $neg_tag_array = [];
         foreach ($tags as $new_tag) {
             if (str_starts_with($new_tag, '-')) {
-                $neg_tag_array[] = substr($new_tag, 1);
+                $new_tag = substr($new_tag, 1);
+                assert($new_tag !== '');
+                $neg_tag_array[] = $new_tag;
             } else {
                 $pos_tag_array[] = $new_tag;
             }
@@ -274,16 +276,16 @@ class BulkActions extends Extension
             }
         } else {
             foreach ($items as $image) {
-                $img_tags = array_map("strtolower", $image->get_tag_array());
+                $img_tags = array_map(strtolower(...), $image->get_tag_array());
 
                 if (!empty($neg_tag_array)) {
-                    $neg_tag_array = array_map("strtolower", $neg_tag_array);
-
+                    $neg_tag_array = array_map(strtolower(...), $neg_tag_array);
                     $img_tags = array_merge($pos_tag_array, $img_tags);
                     $img_tags = array_diff($img_tags, $neg_tag_array);
                 } else {
                     $img_tags = array_merge($tags, $img_tags);
                 }
+                $img_tags = array_filter($img_tags, fn ($tag) => !empty($tag));
                 send_event(new TagSetEvent($image, $img_tags));
                 $total++;
             }
@@ -297,14 +299,13 @@ class BulkActions extends Extension
      */
     private function set_source(iterable $items, string $source): int
     {
-        global $page;
         $total = 0;
         foreach ($items as $image) {
             try {
                 send_event(new SourceSetEvent($image, $source));
                 $total++;
             } catch (\Exception $e) {
-                $page->flash("Error while setting source for {$image->id}: " . $e->getMessage());
+                Ctx::$page->flash("Error while setting source for {$image->id}: " . $e->getMessage());
             }
         }
         return $total;

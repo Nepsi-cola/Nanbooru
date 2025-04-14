@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, ARTICLE, BODY, DIV, FOOTER, H1, HEADER, IMG, LI, NAV, UL, emptyHTML};
 
-use function MicroHTML\{BODY, DIV, LI, A, IMG, rawHTML, emptyHTML, UL, ARTICLE, FOOTER, EM, HEADER, H1, NAV};
+use MicroHTML\HTMLElement;
 
 /**
  * Name: Danbooru 2 Theme
@@ -55,8 +55,6 @@ class Danbooru2Page extends Page
 {
     protected function body_html(): HTMLElement
     {
-        global $config;
-
         list($nav_links, $sub_links) = $this->get_nav_links();
 
         $left_block_html = [];
@@ -76,7 +74,7 @@ class Danbooru2Page extends Page
                     $sub_block_html[] = $block->body;
                     break;
                 case "main":
-                    if ($block->header == "Posts") {
+                    if ($block->header === "Posts") {
                         $block->header = "&nbsp;";
                     }
                     $main_block_html[] = $this->block_html($block, false);
@@ -87,14 +85,14 @@ class Danbooru2Page extends Page
             }
         }
 
-        if (empty($this->subheading)) {
+        if ($this->subheading === "") {
             $subheading = null;
         } else {
             $subheading = DIV(["id" => "subtitle"], $this->subheading);
         }
 
-        $site_name = $config->get_string(SetupConfig::TITLE); // bzchan: change from normal default to get title for top of page
-        $main_page = $config->get_string(SetupConfig::MAIN_PAGE); // bzchan: change from normal default to get main page for top of page
+        $site_name = Ctx::$config->get(SetupConfig::TITLE); // bzchan: change from normal default to get title for top of page
+        $main_page = Ctx::$config->get(SetupConfig::MAIN_PAGE); // bzchan: change from normal default to get main page for top of page
 
         $custom_links = emptyHTML();
         foreach ($nav_links as $nav_link) {
@@ -102,7 +100,7 @@ class Danbooru2Page extends Page
         }
 
         $custom_sublinks = "";
-        if (!empty($sub_links)) {
+        if (count($sub_links) > 0) {
             $custom_sublinks = DIV(["class" => "sbar"]);
             foreach ($sub_links as $nav_link) {
                 $custom_sublinks->appendChild(LI($this->navlinks($nav_link->link, $nav_link->description, $nav_link->active)));
@@ -135,11 +133,11 @@ class Danbooru2Page extends Page
         );
     }
 
-    private function navlinks(Link $link, HTMLElement|string $desc, bool $active): HTMLElement
+    private function navlinks(Url $link, HTMLElement|string $desc, bool $active): HTMLElement
     {
         return A([
             "class" => $active ? "current-page" : "tab",
-            "href" => $link->make_link(),
+            "href" => $link,
         ], $desc);
     }
 }

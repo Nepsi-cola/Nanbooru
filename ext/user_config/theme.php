@@ -4,79 +4,66 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{DIV, H3, INPUT, SECTION, TABLE, TD, TH, TR};
 
-use function MicroHTML\rawHTML;
+use MicroHTML\HTMLElement;
 
 class UserConfigTheme extends Themelet
 {
     public function get_user_operations(string $key): HTMLElement
     {
-        $html = "
-                <p>".make_form(make_link("user_admin/reset_api_key"))."
-                    <table style='width: 300px;'>
-                        <tbody>
-                        <tr><th colspan='2'>API Key</th></tr>
-                        <tr>
-                            <td>
-                                $key
-                            </td>
-                        </tbody>
-                        <tfoot>
-                            <tr><td><input type='submit' value='Reset Key'></td></tr>
-                        </tfoot>
-                    </table>
-                </form>
-            ";
-        return rawHTML($html);
+        return SHM_SIMPLE_FORM(
+            make_link("user_admin/reset_api_key"),
+            TABLE(
+                ["class" => "form"],
+                TR(
+                    TH("API Key"),
+                    TD($key)
+                ),
+                TR(
+                    TD(["colspan" => 2], SHM_SUBMIT("Reset Key"))
+                )
+            ),
+        );
     }
 
-
-    /*
+    /**
      * Display a set of setup option blocks
-     *
-     * $panel = the container of the blocks
-     * $panel->blocks the blocks to be displayed, unsorted
      *
      * It's recommended that the theme sort the blocks before doing anything
      * else, using:  usort($panel->blocks, "blockcmp");
      *
      * The page should wrap all the options in a form which links to setup_save
+     *
+     * @param array<Block> $config_blocks
      */
-    public function display_user_config_page(Page $page, User $user, SetupPanel $panel): void
+    public function display_user_config_page(array $config_blocks, User $user): void
     {
-        usort($panel->blocks, "Shimmie2\blockcmp");
+        usort($config_blocks, Block::cmp(...));
 
-        /*
-         * Try and keep the two columns even; count the line breaks in
-         * each an calculate where a block would work best
-         */
-        $setupblock_html = "";
-        foreach ($panel->blocks as $block) {
-            $setupblock_html .= $this->sb_to_html($block);
+        $blocks = DIV(["class" => "setupblocks"]);
+        foreach ($config_blocks as $block) {
+            $blocks->appendChild($this->sb_to_html($block));
         }
 
-        $table = "
-			".make_form(make_link("user_config/save"))."
-			    <input type='hidden' name='id' value='".$user->id."'>
-				<div class='setupblocks'>$setupblock_html</div>
-				<input class='setupsubmit' type='submit' value='Save Settings'>
-			</form>
-			";
+        $table = SHM_SIMPLE_FORM(
+            make_link("user_config/save"),
+            INPUT(['type' => 'hidden', 'name' => 'id', 'value' => $user->id]),
+            $blocks,
+            INPUT(['class' => 'setupsubmit', 'type' => 'submit', 'value' => 'Save Settings'])
+        );
 
-        $page->set_title("User Options");
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block(null, rawHTML($table), id: "Setupmain"));
-        $page->set_mode(PageMode::PAGE);
+        Ctx::$page->set_title("User Options");
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block(null, $table, id: "Setupmain"));
     }
 
-    protected function sb_to_html(SetupBlock $block): string
+    protected function sb_to_html(Block $block): HTMLElement
     {
-        return "
-			<section class='setupblock'>
-				<h3>{$block->header}</h3>
-				<div class='blockbody'>{$block->str_body}</div>
-			</section>
-		";
+        return SECTION(
+            ["class" => "setupblock"],
+            H3($block->header),
+            DIV(["class" => "blockbody"], $block->body)
+        );
     }
 }

@@ -4,26 +4,27 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\{META,rawHTML};
+use function MicroHTML\{A, NOSCRIPT, UL, emptyHTML};
+use function MicroHTML\{META};
 
 class FilterTheme extends Themelet
 {
     public function addFilterBox(): void
     {
-        global $config, $page, $user, $user_config;
-
         // If user is not able to set their own filters, use the default filters.
-        if ($user->can(Permissions::CHANGE_USER_SETTING)) {
-            $tags = $user_config->get_string("filter_tags");
+        if (Ctx::$user->can(UserAccountsPermission::CHANGE_USER_SETTING)) {
+            $tags = Ctx::$user->get_config()->get(FilterUserConfig::TAGS)
+                ?? Ctx::$config->get(FilterConfig::TAGS);
         } else {
-            $tags = $config->get_string("filter_tags");
+            $tags = Ctx::$config->get(FilterConfig::TAGS);
         }
-        $html = "<noscript>Post filtering requires JavaScript</noscript>
-        <ul id='filter-list' class='list-bulleted'></ul>
-        <a id='disable-all-filters' style='display: none;' href='#'>Disable all</a>
-        <a id='re-enable-all-filters' style='display: none;' href='#'>Re-enable all</a>
-        ";
-        $page->add_html_header(META(['id' => 'filter-tags', 'tags' => $tags]));
-        $page->add_block(new Block("Filters", rawHTML($html), "left", 10));
+        $html = emptyHTML(
+            NOSCRIPT("Post filtering requires JavaScript"),
+            UL(["id" => "filter-list", "class" => "list-bulleted"]),
+            A(["id" => "disable-all-filters", "href" => "#", "style" => "display: none;"], "Disable all"),
+            A(["id" => "re-enable-all-filters", "href" => "#", "style" => "display: none;"], "Re-enable all")
+        );
+        Ctx::$page->add_html_header(META(['id' => 'filter-tags', 'tags' => $tags]));
+        Ctx::$page->add_block(new Block("Filters", $html, "left", 10));
     }
 }

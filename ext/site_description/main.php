@@ -6,31 +6,25 @@ namespace Shimmie2;
 
 use function MicroHTML\{META};
 
-class SiteDescription extends Extension
+final class SiteDescription extends Extension
 {
+    public const KEY = "site_description";
+
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $config, $page;
-        if (!empty($config->get_string("site_description"))) {
-            $description = $config->get_string("site_description");
-            $page->add_html_header(META([
+        $description = Ctx::$config->get(SiteDescriptionConfig::DESCRIPTION);
+        if (!empty($description)) {
+            Ctx::$page->add_html_header(META([
                 'name' => 'description',
                 'content' => $description
             ]));
         }
-        if (!empty($config->get_string("site_keywords"))) {
-            $keywords = $config->get_string("site_keywords");
-            $page->add_html_header(META([
+        $keywords = Ctx::$config->get(SiteDescriptionConfig::KEYWORDS);
+        if (!empty($keywords)) {
+            Ctx::$page->add_html_header(META([
                 'name' => 'keywords',
                 'content' => $keywords
             ]));
         }
-    }
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Site Description");
-        $sb->add_text_option("site_description", "Description: ");
-        $sb->add_text_option("site_keywords", "<br>Keywords: ");
     }
 }

@@ -4,27 +4,27 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, DIV, INPUT, LINK, META, P, TABLE, TD, TR, emptyHTML, joinHTML};
+use function MicroHTML\BR;
 
-use function MicroHTML\{A, joinHTML, TABLE, TR, TD, INPUT, emptyHTML, rawHTML, DIV, BR, META, LINK};
+use MicroHTML\HTMLElement;
 
 class ViewPostTheme extends Themelet
 {
     public function display_meta_headers(Image $image): void
     {
-        global $page;
-
+        $page = Ctx::$page;
         $h_metatags = str_replace(" ", ", ", $image->get_tag_list());
         $page->add_html_header(META(["name" => "keywords", "content" => $h_metatags]));
         $page->add_html_header(META(["property" => "og:title", "content" => $h_metatags]));
         $page->add_html_header(META(["property" => "og:type", "content" => "article"]));
-        $page->add_html_header(META(["property" => "og:image", "content" => make_http($image->get_image_link())]));
-        $page->add_html_header(META(["property" => "og:url", "content" => make_http(make_link("post/view/{$image->id}"))]));
+        $page->add_html_header(META(["property" => "og:image", "content" => $image->get_image_link()->asAbsolute()]));
+        $page->add_html_header(META(["property" => "og:url", "content" => make_link("post/view/{$image->id}")->asAbsolute()]));
         $page->add_html_header(META(["property" => "og:image:width", "content" => $image->width]));
         $page->add_html_header(META(["property" => "og:image:height", "content" => $image->height]));
         $page->add_html_header(META(["property" => "twitter:title", "content" => $h_metatags]));
         $page->add_html_header(META(["property" => "twitter:card", "content" => "summary_large_image"]));
-        $page->add_html_header(META(["property" => "twitter:image:src", "content" => make_http($image->get_image_link())]));
+        $page->add_html_header(META(["property" => "twitter:image:src", "content" => $image->get_image_link()->asAbsolute()]));
     }
 
     /**
@@ -34,15 +34,15 @@ class ViewPostTheme extends Themelet
      */
     public function display_page(Image $image, array $editor_parts): void
     {
-        global $page;
+        $page = Ctx::$page;
         $page->set_title("Post {$image->id}: ".$image->get_tag_list());
         $page->set_heading($image->get_tag_list());
         $page->add_block(new Block("Post {$image->id}", $this->build_navigation($image), "left", 0, "Navigationleft"));
         $page->add_block(new Block(null, $this->build_info($image, $editor_parts), "main", 20, "ImageInfo"));
         //$page->add_block(new Block(null, $this->build_pin($image), "main", 11));
 
-        $query = $this->get_query();
         if (!$this->is_ordered_search()) {
+            $query = $this->get_query();
             $page->add_html_header(LINK(["id" => "nextlink", "rel" => "next", "href" => make_link("post/next/{$image->id}", $query)]));
             $page->add_html_header(LINK(["id" => "prevlink", "rel" => "previous", "href" => make_link("post/prev/{$image->id}", $query)]));
         }
@@ -51,17 +51,17 @@ class ViewPostTheme extends Themelet
     /**
      * @param HTMLElement[] $parts
      */
-    public function display_admin_block(Page $page, array $parts): void
+    public function display_admin_block(array $parts): void
     {
         if (count($parts) > 0) {
-            $page->add_block(new Block("Post Controls", DIV(["class" => "post_controls"], joinHTML("", $parts)), "left", 50));
+            Ctx::$page->add_block(new Block("Post Controls", DIV(["class" => "post_controls"], joinHTML("", $parts)), "left", 50));
         }
     }
 
-    protected function get_query(): ?string
+    protected function get_query(): ?QueryArray
     {
         if (isset($_GET['search'])) {
-            $query = "search=".url_escape($_GET['search']);
+            $query = new QueryArray(["search" => $_GET['search']]);
         } else {
             $query = null;
         }
@@ -77,7 +77,7 @@ class ViewPostTheme extends Themelet
         if (isset($_GET['search'])) {
             $tags = Tag::explode($_GET['search']);
             foreach ($tags as $tag) {
-                if (\Safe\preg_match("/^order[=:]/", $tag) == 1) {
+                if (\Safe\preg_match("/^order[=:]/", $tag) === 1) {
                     return true;
                 }
             }
@@ -87,10 +87,10 @@ class ViewPostTheme extends Themelet
 
     protected function build_pin(Image $image): HTMLElement
     {
-        $query = $this->get_query();
         if ($this->is_ordered_search()) {
             return A(["href" => make_link()], "Index");
         } else {
+            $query = $this->get_query();
             return joinHTML(" | ", [
                 A(["href" => make_link("post/prev/{$image->id}", $query), "id" => "prevlink"], "Prev"),
                 A(["href" => make_link()], "Index"),
@@ -101,16 +101,26 @@ class ViewPostTheme extends Themelet
 
     protected function build_navigation(Image $image): HTMLElement
     {
-        $h_pin = $this->build_pin($image);
-        $h_search = "
-			<p><form action='".search_link()."' method='GET'>
-				<input type='hidden' name='q' value='post/list'>
-				<input type='search' name='search' placeholder='Search' class='autocomplete_tags'>
-				<input type='submit' value='Find' style='display: none;'>
-			</form>
-		";
+        $pin = $this->build_pin($image);
 
-        return rawHTML("$h_pin<br>$h_search");
+        $search = SHM_FORM(
+            action: search_link(),
+            method: 'GET',
+            children: [
+                INPUT([
+                    "name" => 'search',
+                    "type" => 'text',
+                    "class" => 'autocomplete_tags',
+                ]),
+                INPUT([
+                    "type" => 'submit',
+                    "value" => 'Find',
+                    "style" => 'display: none;'
+                ]),
+            ]
+        );
+
+        return emptyHTML($pin, P(), $search);
     }
 
     /**
@@ -118,15 +128,13 @@ class ViewPostTheme extends Themelet
      */
     protected function build_info(Image $image, array $editor_parts): HTMLElement
     {
-        global $user;
-
-        if (count($editor_parts) == 0) {
+        if (count($editor_parts) === 0) {
             return emptyHTML($image->is_locked() ? "[Post Locked]" : "");
         }
 
         if (
-            (!$image->is_locked() || $user->can(Permissions::EDIT_IMAGE_LOCK)) &&
-            $user->can(Permissions::EDIT_IMAGE_TAG)
+            (!$image->is_locked() || Ctx::$user->can(PostLockPermission::EDIT_IMAGE_LOCK)) &&
+            Ctx::$user->can(PostTagsPermission::EDIT_IMAGE_TAG)
         ) {
             $editor_parts[] = TR(TD(
                 ["colspan" => 4],
@@ -135,8 +143,21 @@ class ViewPostTheme extends Themelet
             ));
         }
 
+        // SHM_POST_INFO returns a TR, let's sneakily append
+        // a TD with the avatar in it
+        /** @var BuildAvatarEvent $bae */
+        $bae = send_event(new BuildAvatarEvent($image->get_owner()));
+        if ($bae->html) {
+            array_values($editor_parts)[0]->appendChild(
+                TD(
+                    ["class" => "image-info-avatar-box", "width" => Ctx::$config->get(SetupConfig::AVATAR_SIZE) . "px", "rowspan" => count($editor_parts) - 2],
+                    $bae->html
+                )
+            );
+        }
+
         return SHM_SIMPLE_FORM(
-            "post/set",
+            make_link("post/set"),
             INPUT(["type" => "hidden", "name" => "image_id", "value" => $image->id]),
             TABLE(
                 [
@@ -145,5 +166,35 @@ class ViewPostTheme extends Themelet
                 ...$editor_parts,
             ),
         );
+    }
+
+    protected function build_stats(Image $image): HTMLElement
+    {
+        $owner = $image->get_owner()->name;
+        $ip = Ctx::$user->can(IPBanPermission::VIEW_IP) ? " ({$image->owner_ip})" : "";
+
+        $parts = [
+            "ID: {$image->id}",
+            emptyHTML("Uploader: ", A(["href" => make_link("user/$owner")], $owner . $ip)),
+            emptyHTML("Date: ", SHM_DATE($image->posted)),
+            "Size: ".to_shorthand_int($image->filesize)." ({$image->width}x{$image->height})",
+            "Type: {$image->get_mime()}",
+        ];
+        if ($image->video_codec !== null) {
+            $parts[] = "Video Codec: {$image->video_codec->name}";
+        }
+        if ($image->length !== null) {
+            $parts[] = "Length: " . format_milliseconds($image->length);
+        }
+        if ($image->source !== null) {
+            $parts[] = emptyHTML("Source: ", A(["href" => $image->source], "link"));
+        }
+        if (RatingsInfo::is_enabled()) {
+            $rating = $image['rating'] ?? "?";
+            $h_rating = Ratings::rating_to_human($rating);
+            $parts[] = emptyHTML("Rating: ", A(["href" => search_link(["rating=$rating"])], $h_rating));
+        }
+
+        return joinHTML(BR(), $parts);
     }
 }

@@ -4,28 +4,25 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class BulkParentChildConfig
+final class BulkParentChildConfig
 {
 }
 
-class BulkParentChild extends Extension
+final class BulkParentChild extends Extension
 {
-    private const PARENT_CHILD_ACTION_NAME = "bulk_parent_child";
+    public const KEY = "bulk_parent_child";
 
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
-        global $user;
-
-        if ($user->can(Permissions::BULK_PARENT_CHILD)) {
-            $event->add_action(BulkParentChild::PARENT_CHILD_ACTION_NAME, "Set Parent Child");
-        }
+        $event->add_action("parent-child", "Set Parent Child", permission: BulkParentChildPermission::BULK_PARENT_CHILD);
     }
 
     public function onBulkAction(BulkActionEvent $event): void
     {
-        global $user, $page, $config;
-        if ($user->can(Permissions::BULK_PARENT_CHILD) &&
-            ($event->action == BulkParentChild::PARENT_CHILD_ACTION_NAME)) {
+        if (
+            Ctx::$user->can(BulkParentChildPermission::BULK_PARENT_CHILD)
+            && ($event->action === "parent-child")
+        ) {
             $prev_id = null;
             foreach ($event->items as $image) {
                 if ($prev_id !== null) {

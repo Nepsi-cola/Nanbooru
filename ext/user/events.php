@@ -7,11 +7,11 @@ namespace Shimmie2;
 use MicroHTML\HTMLElement;
 
 /**
- * @extends PartListBuildingEvent<array{name: string|HTMLElement, link: string}>
+ * @extends PartListBuildingEvent<array{name: string|HTMLElement, link: Url}>
  */
 class UserBlockBuildingEvent extends PartListBuildingEvent
 {
-    public function add_link(string|HTMLElement $name, string $link, int $position = 50): void
+    public function add_link(string|HTMLElement $name, Url $link, int $position = 50): void
     {
         $this->add_part(["name" => $name, "link" => $link], $position);
     }
@@ -31,7 +31,7 @@ class UserOperationsBuildingEvent extends PartListBuildingEvent
 }
 
 /**
- * @extends PartListBuildingEvent<string>
+ * @extends PartListBuildingEvent<HTMLElement>
  */
 class UserPageBuildingEvent extends PartListBuildingEvent
 {

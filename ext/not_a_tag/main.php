@@ -4,13 +4,11 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroCRUD\ActionColumn;
-use MicroCRUD\TextColumn;
-use MicroCRUD\Table;
+use MicroCRUD\{ActionColumn, Table, TextColumn};
 
 use function MicroHTML\{emptyHTML};
 
-class NotATagTable extends Table
+final class NotATagTable extends Table
 {
     public function __construct(\FFSPHP\PDO $db)
     {
@@ -32,8 +30,11 @@ class NotATagTable extends Table
     }
 }
 
-class NotATag extends Extension
+final class NotATag extends Extension
 {
+    public const KEY = "not_a_tag";
+    public const VERSION_KEY = "ext_notatag_version";
+
     public function get_priority(): int
     {
         return 30;
@@ -41,20 +42,19 @@ class NotATag extends Extension
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
-        global $database;
-        if ($this->get_version("ext_notatag_version") < 1) {
+        $database = Ctx::$database;
+        if ($this->get_version() < 1) {
             $database->create_table("untags", "
 				tag VARCHAR(128) NOT NULL PRIMARY KEY,
 				redirect VARCHAR(255) NOT NULL
 			");
-            $this->set_version("ext_notatag_version", 1);
+            $this->set_version(1);
         }
     }
 
     public function onTagSet(TagSetEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::BAN_IMAGE)) {
+        if (Ctx::$user->can(ImageHashBanPermission::BAN_IMAGE)) {
             $event->new_tags = $this->strip($event->new_tags);
         } else {
             $this->scan($event->new_tags);
@@ -66,17 +66,16 @@ class NotATag extends Extension
      */
     private function scan(array $tags_mixed): void
     {
-        global $database;
-
         $tags = [];
         foreach ($tags_mixed as $tag) {
             $tags[] = strtolower($tag);
         }
 
-        $pairs = $database->get_pairs("SELECT LOWER(tag), redirect FROM untags");
+        $pairs = Ctx::$database->get_pairs("SELECT LOWER(tag), redirect FROM untags");
         foreach ($pairs as $tag => $url) {
             // cast to string because PHP automatically turns ["69" => "No sex"]
             // into [69 => "No sex"]
+            // @phpstan-ignore-next-line
             if (in_array(strtolower((string)$tag), $tags)) {
                 throw new TagSetException("Invalid tag used: $tag", $url);
             }
@@ -84,13 +83,12 @@ class NotATag extends Extension
     }
 
     /**
-     * @param string[] $tags
-     * @return string[]
+     * @param list<tag-string> $tags
+     * @return list<tag-string>
      */
     private function strip(array $tags): array
     {
-        global $database;
-        $untags = $database->get_col("SELECT LOWER(tag) FROM untags");
+        $untags = Ctx::$database->get_col("SELECT LOWER(tag) FROM untags");
 
         $ok_tags = [];
         foreach ($tags as $tag) {
@@ -99,7 +97,7 @@ class NotATag extends Extension
             }
         }
 
-        if (count($ok_tags) == 0) {
+        if (count($ok_tags) === 0) {
             $ok_tags = ["tagme"];
         }
 
@@ -108,51 +106,48 @@ class NotATag extends Extension
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        global $user;
         if ($event->parent === "tags") {
-            if ($user->can(Permissions::BAN_IMAGE)) {
-                $event->add_nav_link("untags", new Link('untag/list'), "UnTags");
+            if (Ctx::$user->can(ImageHashBanPermission::BAN_IMAGE)) {
+                $event->add_nav_link(make_link('untag/list'), "UnTags");
             }
         }
     }
 
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::BAN_IMAGE)) {
+        if (Ctx::$user->can(ImageHashBanPermission::BAN_IMAGE)) {
             $event->add_link("UnTags", make_link("untag/list"));
         }
     }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $database, $page, $user;
+        $page = Ctx::$page;
+        $database = Ctx::$database;
 
-        if ($event->page_matches("untag/add", method: "POST", permission: Permissions::BAN_IMAGE)) {
+        if ($event->page_matches("untag/add", method: "POST", permission: ImageHashBanPermission::BAN_IMAGE)) {
             $input = validate_input(["c_tag" => "string", "c_redirect" => "string"]);
             $database->execute(
                 "INSERT INTO untags(tag, redirect) VALUES (:tag, :redirect)",
                 ["tag" => $input['c_tag'], "redirect" => $input['c_redirect']]
             );
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(referer_or(make_link()));
+            $page->set_redirect(Url::referer_or());
         }
-        if ($event->page_matches("untag/remove", method: "POST", permission: Permissions::BAN_IMAGE)) {
+        if ($event->page_matches("untag/remove", method: "POST", permission: ImageHashBanPermission::BAN_IMAGE)) {
             $input = validate_input(["d_tag" => "string"]);
             $database->execute(
                 "DELETE FROM untags WHERE LOWER(tag) = LOWER(:tag)",
                 ["tag" => $input['d_tag']]
             );
             $page->flash("Post ban removed");
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(referer_or(make_link()));
+            $page->set_redirect(Url::referer_or());
         }
         if ($event->page_matches("untag/list")) {
             $t = new NotATagTable($database->raw_db());
-            $t->token = $user->get_auth_token();
-            $t->inputs = $event->GET;
+            $t->token = Ctx::$user->get_auth_token();
+            $t->inputs = $event->GET->toArray();
             $page->set_title("UnTags");
-            $page->add_block(new NavBlock());
+            $this->theme->display_navigation();
             $page->add_block(new Block(null, emptyHTML($t->table($t->query()), $t->paginator())));
         }
     }

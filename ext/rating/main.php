@@ -4,32 +4,27 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class ImageRating
+final class ImageRating
 {
     /** @var array<string, ImageRating> */
     public static array $known_ratings = [];
-    public string $name;
-    public string $code;
-    public string $search_term;
-    public int $order = 0;
 
-    public function __construct(string $code, string $name, string $search_term, int $order)
-    {
-        assert(strlen($code) == 1, "Rating code must be exactly one character");
-
-        $this->name = $name;
-        $this->code = $code;
-        $this->search_term = $search_term;
-        $this->order = $order;
+    public function __construct(
+        public string $code,
+        public string $name,
+        public string $search_term,
+        public int $order
+    ) {
+        assert(strlen($code) === 1, "Rating code must be exactly one character");
     }
 }
 
 function add_rating(ImageRating $rating): void
 {
-    if ($rating->code == "?" && array_key_exists("?", ImageRating::$known_ratings)) {
+    if ($rating->code === "?" && array_key_exists("?", ImageRating::$known_ratings)) {
         throw new \RuntimeException("? is a reserved rating code that cannot be overridden");
     }
-    if ($rating->code != "?" && in_array(strtolower($rating->search_term), Ratings::UNRATED_KEYWORDS)) {
+    if ($rating->code !== "?" && in_array(strtolower($rating->search_term), Ratings::UNRATED_KEYWORDS)) {
         throw new \RuntimeException("$rating->search_term is a reserved search term");
     }
     ImageRating::$known_ratings[$rating->code] = $rating;
@@ -42,7 +37,7 @@ add_rating(new ImageRating("e", "Explicit", "explicit", 1000));
 // @phpstan-ignore-next-line
 @include_once "data/config/ratings.conf.php";
 
-class RatingSetException extends UserError
+final class RatingSetException extends UserError
 {
     public ?string $redirect;
 
@@ -53,30 +48,22 @@ class RatingSetException extends UserError
     }
 }
 
-class RatingSetEvent extends Event
+final class RatingSetEvent extends Event
 {
-    public Image $image;
-    public string $rating;
-
-    public function __construct(Image $image, string $rating)
-    {
+    public function __construct(
+        public Image $image,
+        public string $rating
+    ) {
         parent::__construct();
-
         assert(in_array($rating, array_keys(ImageRating::$known_ratings)));
-
-        $this->image = $image;
-        $this->rating = $rating;
     }
 }
 
-abstract class RatingsConfig
+final class Ratings extends Extension
 {
-    public const VERSION = "ext_ratings2_version";
-    public const USER_DEFAULTS = "ratings_default";
-}
+    public const KEY = "rating";
+    public const VERSION_KEY = "ext_ratings2_version";
 
-class Ratings extends Extension
-{
     /** @var RatingsTheme */
     protected Themelet $theme;
 
@@ -86,8 +73,6 @@ class Ratings extends Extension
 
     public function onInitExt(InitExtEvent $event): void
     {
-        global $config;
-
         $codes = implode("", array_keys(ImageRating::$known_ratings));
         $search_terms = [];
         foreach (ImageRating::$known_ratings as $key => $rating) {
@@ -96,30 +81,16 @@ class Ratings extends Extension
         $this->search_regexp = "/^rating[=|:](?:(\*|[" . $codes . "]+)|(" .
             implode("|", $search_terms) . "|".implode("|", self::UNRATED_KEYWORDS)."))$/iD";
 
-        foreach (array_keys(UserClass::$known_classes) as $key) {
-            if ($key == "base" || $key == "hellbanned") {
-                continue;
-            }
-            $config->set_default_array("ext_rating_" . $key . "_privs", array_keys(ImageRating::$known_ratings));
-        }
-
         Image::$prop_types["rating"] = ImagePropType::STRING;
     }
 
     private function check_permissions(Image $image): bool
     {
-        global $user;
-
-        $user_view_level = Ratings::get_user_class_privs($user);
+        $user_view_level = Ratings::get_user_class_privs(Ctx::$user);
         if (!in_array($image['rating'], $user_view_level)) {
             return false;
         }
         return true;
-    }
-
-    public function onInitUserConfig(InitUserConfigEvent $event): void
-    {
-        $event->user_config->set_default_array(RatingsConfig::USER_DEFAULTS, self::get_user_class_privs($event->user));
     }
 
     public function onImageDownloading(ImageDownloadingEvent $event): void
@@ -132,52 +103,13 @@ class Ratings extends Extension
         }
     }
 
-    public function onUserOptionsBuilding(UserOptionsBuildingEvent $event): void
-    {
-        global $user;
-
-        $levels = self::get_user_class_privs($user);
-        $options = [];
-        foreach ($levels as $level) {
-            $options[ImageRating::$known_ratings[$level]->name] = $level;
-        }
-
-        $sb = $event->panel->create_new_block("Default Rating Filter");
-        $sb->start_table();
-        $sb->add_multichoice_option(RatingsConfig::USER_DEFAULTS, $options, "Default Ratings: ", true);
-        $sb->end_table();
-        $sb->add_label("This controls the default rating search results will be filtered by, and nothing else. To override in your search results, add rating:* to your search.");
-    }
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $ratings = self::get_sorted_ratings();
-
-        $options = [];
-        foreach ($ratings as $key => $rating) {
-            $options[$rating->name] = $rating->code;
-        }
-
-        $sb = $event->panel->create_new_block("Post Rating Visibility");
-        $sb->start_table();
-        foreach (array_keys(UserClass::$known_classes) as $key) {
-            if ($key == "base" || $key == "hellbanned") {
-                continue;
-            }
-            $sb->add_multichoice_option("ext_rating_" . $key . "_privs", $options, $key, true);
-        }
-        $sb->end_table();
-    }
-
     public function onDisplayingImage(DisplayingImageEvent $event): void
     {
-        global $page;
         /**
          * Deny images upon insufficient permissions.
          **/
         if (!$this->check_permissions($event->image)) {
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link());
+            Ctx::$page->set_redirect(make_link());
         }
     }
 
@@ -206,12 +138,11 @@ class Ratings extends Extension
 
     public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
     {
-        global $user;
         $event->add_part(
             $this->theme->get_image_rater_html(
                 $event->image->id,
                 $event->image['rating'],
-                $user->can(Permissions::EDIT_IMAGE_RATING)
+                Ctx::$user->can(RatingsPermission::EDIT_IMAGE_RATING)
             ),
             80
         );
@@ -219,9 +150,8 @@ class Ratings extends Extension
 
     public function onImageInfoSet(ImageInfoSetEvent $event): void
     {
-        global $page, $user;
         if (
-            $user->can(Permissions::EDIT_IMAGE_RATING) && (
+            Ctx::$user->can(RatingsPermission::EDIT_IMAGE_RATING) && (
                 isset($event->params['rating'])
                 || isset($event->params["rating{$event->slot}"])
             )
@@ -234,9 +164,9 @@ class Ratings extends Extension
                     send_event(new RatingSetEvent($event->image, $rating));
                 } catch (RatingSetException $e) {
                     if ($e->redirect) {
-                        $page->flash("{$e->getMessage()}, please see {$e->redirect}");
+                        Ctx::$page->flash("{$e->getMessage()}, please see {$e->redirect}");
                     } else {
-                        $page->flash($e->getMessage());
+                        Ctx::$page->flash($e->getMessage());
                     }
                     throw $e;
                 }
@@ -247,7 +177,7 @@ class Ratings extends Extension
     public function onParseLinkTemplate(ParseLinkTemplateEvent $event): void
     {
         if (!is_null($event->image['rating'])) {
-            $event->replace('$rating', $this->rating_to_human($event->image['rating']));
+            $event->replace('$rating', self::rating_to_human($event->image['rating']));
         }
     }
 
@@ -261,8 +191,6 @@ class Ratings extends Extension
 
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
-        global $user;
-
         $matches = [];
         if (is_null($event->term) && $this->no_rating_query($event->context)) {
             $set = Ratings::privs_to_sql(Ratings::get_user_default_ratings());
@@ -276,10 +204,10 @@ class Ratings extends Extension
                 $ratings = "?";
             }
 
-            if ($ratings == '*') {
-                $ratings = Ratings::get_user_class_privs($user);
+            if ($ratings === '*') {
+                $ratings = Ratings::get_user_class_privs(Ctx::$user);
             } else {
-                $ratings = array_intersect(str_split($ratings), Ratings::get_user_class_privs($user));
+                $ratings = array_intersect(str_split($ratings), Ratings::get_user_class_privs(Ctx::$user));
             }
 
             $set = "'" . join("', '", $ratings) . "'";
@@ -296,8 +224,6 @@ class Ratings extends Extension
 
     public function onTagTermParse(TagTermParseEvent $event): void
     {
-        global $user;
-
         if ($matches = $event->matches($this->search_regexp)) {
             $ratings = strtolower($matches[1] ? $matches[1] : $matches[2][0]);
 
@@ -305,7 +231,7 @@ class Ratings extends Extension
                 $ratings = "?";
             }
 
-            $ratings = array_intersect(str_split($ratings), Ratings::get_user_class_privs($user));
+            $ratings = array_intersect(str_split($ratings), Ratings::get_user_class_privs(Ctx::$user));
             $rating = $ratings[0];
             $image = Image::by_id_ex($event->image_id);
             send_event(new RatingSetEvent($image, $rating));
@@ -332,22 +258,17 @@ class Ratings extends Extension
 
     public function onAdminAction(AdminActionEvent $event): void
     {
-        global $database, $user;
-        $action = $event->action;
-        switch ($action) {
+        switch ($event->action) {
             case "update_ratings":
                 $event->redirect = true;
-                if (!array_key_exists("rating_old", $event->params) || empty($event->params["rating_old"])) {
+                $old = $event->params["rating_old"] ?? null;
+                $new = $event->params["rating_new"] ?? null;
+                if (!$old || !$new) {
                     return;
                 }
-                if (!array_key_exists("rating_new", $event->params) || empty($event->params["rating_new"])) {
-                    return;
-                }
-                $old = $event->params["rating_old"];
-                $new = $event->params["rating_new"];
 
-                if ($user->can(Permissions::BULK_EDIT_IMAGE_RATING)) {
-                    $database->execute("UPDATE images SET rating = :new WHERE rating = :old", ["new" => $new, "old" => $old ]);
+                if (Ctx::$user->can(RatingsPermission::BULK_EDIT_IMAGE_RATING)) {
+                    Ctx::$database->execute("UPDATE images SET rating = :new WHERE rating = :old", ["new" => $new, "old" => $old ]);
                 }
 
                 break;
@@ -356,30 +277,31 @@ class Ratings extends Extension
 
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
-        global $user;
-
-        if ($user->can(Permissions::BULK_EDIT_IMAGE_RATING)) {
-            $event->add_action("bulk_rate", "Set (R)ating", "r", "", (string)$this->theme->get_selection_rater_html(selected_options: ["?"]));
-        }
+        $event->add_action(
+            "rate",
+            "Set (R)ating",
+            "r",
+            "",
+            $this->theme->get_selection_rater_html(selected_options: ["?"]),
+            permission: RatingsPermission::BULK_EDIT_IMAGE_RATING
+        );
     }
 
     public function onBulkAction(BulkActionEvent $event): void
     {
-        global $page, $user;
-
         switch ($event->action) {
-            case "bulk_rate":
+            case "rate":
                 if (!isset($event->params['rating'])) {
                     return;
                 }
-                if ($user->can(Permissions::BULK_EDIT_IMAGE_RATING)) {
+                if (Ctx::$user->can(RatingsPermission::BULK_EDIT_IMAGE_RATING)) {
                     $rating = $event->params['rating'];
                     $total = 0;
                     foreach ($event->items as $image) {
                         send_event(new RatingSetEvent($image, $rating));
                         $total++;
                     }
-                    $page->flash("Rating set for $total items");
+                    $event->log_action("Rating set for $total items");
                 }
                 break;
         }
@@ -387,25 +309,23 @@ class Ratings extends Extension
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $user, $page;
-
-        if ($event->page_matches("admin/bulk_rate", method: "POST", permission: Permissions::BULK_EDIT_IMAGE_RATING)) {
+        if ($event->page_matches("admin/bulk_rate", method: "POST", permission: RatingsPermission::BULK_EDIT_IMAGE_RATING)) {
             $n = 0;
             while (true) {
-                $images = Search::find_images($n, 100, Tag::explode($event->req_POST("query")));
-                if (count($images) == 0) {
+                $images = Search::find_images($n, 100, Tag::explode($event->POST->req("query")));
+                if (count($images) === 0) {
                     break;
                 }
 
                 reset($images); // rewind to first element in array.
 
                 foreach ($images as $image) {
-                    send_event(new RatingSetEvent($image, $event->req_POST('rating')));
+                    send_event(new RatingSetEvent($image, $event->POST->req('rating')));
                 }
                 $n += 100;
             }
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link());
+
+            Ctx::$page->set_redirect(make_link());
         }
     }
 
@@ -457,9 +377,9 @@ class Ratings extends Extension
      */
     public static function get_user_class_privs(User $user): array
     {
-        global $config;
-
-        return $config->get_array("ext_rating_".$user->class->name."_privs");
+        $val = Ctx::$config->get("ext_rating_".$user->class->name."_privs", ConfigType::ARRAY)
+            ?? array_keys(ImageRating::$known_ratings);
+        return $val;
     }
 
     /**
@@ -470,10 +390,8 @@ class Ratings extends Extension
      */
     public static function get_user_default_ratings(): array
     {
-        global $user_config, $user;
-
-        $available = self::get_user_class_privs($user);
-        $selected = $user_config->get_array(RatingsConfig::USER_DEFAULTS);
+        $available = self::get_user_class_privs(Ctx::$user);
+        $selected = Ctx::$user->get_config()->get(RatingsUserConfig::DEFAULTS) ?? $available;
 
         return array_intersect($available, $selected);
     }
@@ -487,7 +405,7 @@ class Ratings extends Extension
         foreach ($privs as $i) {
             $arr[] = "'" . $i . "'";
         }
-        if (sizeof($arr) == 0) {
+        if (count($arr) === 0) {
             return "' '";
         }
         return join(', ', $arr);
@@ -521,20 +439,20 @@ class Ratings extends Extension
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
-        global $database, $config;
+        global $database;
 
-        if ($this->get_version(RatingsConfig::VERSION) < 1) {
+        if ($this->get_version() < 1) {
             $database->execute("ALTER TABLE images ADD COLUMN rating CHAR(1) NOT NULL DEFAULT '?'");
             $database->execute("CREATE INDEX images__rating ON images(rating)");
-            $this->set_version(RatingsConfig::VERSION, 3);
+            $this->set_version(3);
         }
 
-        if ($this->get_version(RatingsConfig::VERSION) < 2) {
+        if ($this->get_version() < 2) {
             $database->execute("CREATE INDEX images__rating ON images(rating)");
-            $this->set_version(RatingsConfig::VERSION, 2);
+            $this->set_version(2);
         }
 
-        if ($this->get_version(RatingsConfig::VERSION) < 3) {
+        if ($this->get_version() < 3) {
             $database->execute("UPDATE images SET rating = 'u' WHERE rating is null");
             switch ($database->get_driver_id()) {
                 case DatabaseDriverID::MYSQL:
@@ -545,21 +463,21 @@ class Ratings extends Extension
                     $database->execute("ALTER TABLE images ALTER COLUMN rating SET NOT NULL");
                     break;
             }
-            $this->set_version(RatingsConfig::VERSION, 3);
+            $this->set_version(3);
         }
 
-        if ($this->get_version(RatingsConfig::VERSION) < 4) {
-            $value = $config->get_string("ext_rating_anon_privs");
-            if (!empty($value)) {
-                $config->set_array("ext_rating_anonymous_privs", str_split($value));
+        if ($this->get_version() < 4) {
+            $value = Ctx::$config->get("ext_rating_anon_privs");
+            if (is_string($value)) {
+                Ctx::$config->set("ext_rating_anonymous_privs", str_split($value));
             }
-            $value = $config->get_string("ext_rating_user_privs");
-            if (!empty($value)) {
-                $config->set_array("ext_rating_user_privs", str_split($value));
+            $value = Ctx::$config->get("ext_rating_user_privs");
+            if (is_string($value)) {
+                Ctx::$config->set("ext_rating_user_privs", str_split($value));
             }
-            $value = $config->get_string("ext_rating_admin_privs");
-            if (!empty($value)) {
-                $config->set_array("ext_rating_admin_privs", str_split($value));
+            $value = Ctx::$config->get("ext_rating_admin_privs");
+            if (is_string($value)) {
+                Ctx::$config->set("ext_rating_admin_privs", str_split($value));
             }
 
             switch ($database->get_driver_id()) {
@@ -575,16 +493,16 @@ class Ratings extends Extension
 
             $database->execute("UPDATE images SET rating = :new WHERE rating = :old", ["new" => '?', "old" => 'u' ]);
 
-            $this->set_version(RatingsConfig::VERSION, 4);
+            $this->set_version(4);
         }
     }
 
     private function set_rating(int $image_id, string $rating, string $old_rating): void
     {
         global $database;
-        if ($old_rating != $rating) {
+        if ($old_rating !== $rating) {
             $database->execute("UPDATE images SET rating=:rating WHERE id=:id", ['rating' => $rating, 'id' => $image_id]);
-            log_info("rating", "Rating for >>{$image_id} set to: ".$this->rating_to_human($rating));
+            Log::info("rating", "Rating for >>{$image_id} set to: ".self::rating_to_human($rating));
         }
     }
 }

@@ -4,26 +4,23 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\INPUT;
-use function MicroHTML\DIV;
-use function MicroHTML\A;
-use function MicroHTML\IMG;
+use function MicroHTML\{A, DIV, IMG};
 
 class FeaturedTheme extends Themelet
 {
-    public function display_featured(Page $page, Image $image): void
+    public function display_featured(Image $image): void
     {
-        $page->add_block(new Block("Featured Post", $this->build_featured_html($image), "left", 3));
+        Ctx::$page->add_block(new Block("Featured Post", $this->build_featured_html($image), "left", 3));
     }
 
-    public function build_featured_html(Image $image, ?string $query = null): \MicroHTML\HTMLElement
+    public function build_featured_html(Image $image): \MicroHTML\HTMLElement
     {
-        $tsize = get_thumbnail_size($image->width, $image->height);
+        $tsize = $image->get_thumb_size();
 
         return DIV(
             ["style" => "text-align: center;"],
             A(
-                ["href" => make_link("post/view/{$image->id}", $query)],
+                ["href" => make_link("post/view/{$image->id}")],
                 IMG([
                     "id" => "thumb_rand_{$image->id}",
                     "title" => $image->get_tooltip(),

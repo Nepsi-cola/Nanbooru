@@ -4,23 +4,27 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\{TEXTAREA,rawHTML};
+use function MicroHTML\{TABLE, TD, TR};
+use function MicroHTML\{TEXTAREA};
 
 class BiographyTheme extends Themelet
 {
-    public function display_biography(Page $page, string $bio): void
+    public function display_biography(string $bio): void
     {
-        $page->add_block(new Block("About Me", rawHTML(format_text($bio)), "main", 30, "about-me"));
+        Ctx::$page->add_block(new Block("About Me", format_text($bio), "main", 30, "about-me"));
     }
 
-    public function display_composer(Page $page, string $bio): void
+    public function display_composer(User $duser, string $bio): void
     {
         $html = SHM_SIMPLE_FORM(
-            make_link("biography"),
-            TEXTAREA(["style" => "width: 100%", "rows" => "6", "name" => "biography"], $bio),
-            SHM_SUBMIT("Save")
+            make_link("user/{$duser->name}/biography"),
+            TABLE(
+                ["class" => "form", "style" => "width: 100%"],
+                TR(TD(TEXTAREA(["rows" => "6", "name" => "biography"], $bio))),
+                TR(TD(SHM_SUBMIT("Save")))
+            ),
         );
 
-        $page->add_block(new Block("About Me", $html, "main", 30));
+        Ctx::$page->add_block(new Block("About Me", $html, "main", 30));
     }
 }

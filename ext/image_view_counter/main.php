@@ -4,23 +4,19 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class ImageViewCounter extends Extension
+final class ImageViewCounter extends Extension
 {
+    public const KEY = "image_view_counter";
+    public const VERSION_KEY = 'ext_image_view_counter';
+
     /** @var ImageViewCounterTheme */
     protected Themelet $theme;
     private int $view_interval = 3600; # allows views to be added each hour
 
-    # Add Setup Block with options for view counter
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Post View Counter");
-        $sb->add_bool_option("image_viewcounter_adminonly", "Display view counter only to admin");
-    }
-
     # Adds view to database if needed
     public function onDisplayingImage(DisplayingImageEvent $event): void
     {
-        global $database, $user;
+        global $database;
 
         $imgid = $event->image->id;
 
@@ -32,7 +28,7 @@ class ImageViewCounter extends Extension
 				WHERE ipaddress=:ipaddress AND timestamp >:lasthour AND image_id =:image_id
 			",
             [
-                "ipaddress" => get_real_ip(),
+                "ipaddress" => Network::get_real_ip(),
                 "lasthour" => time() - $this->view_interval,
                 "image_id" => $imgid
             ]
@@ -51,18 +47,18 @@ class ImageViewCounter extends Extension
 			",
             [
                 "image_id" => $imgid,
-                "user_id" => $user->id,
+                "user_id" => Ctx::$user->id,
                 "timestamp" => time(),
-                "ipaddress" => get_real_ip(),
+                "ipaddress" => Network::get_real_ip(),
             ]
         );
     }
 
     public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
     {
-        global $user, $database;
+        global $database;
 
-        if ($user->can(Permissions::SEE_IMAGE_VIEW_COUNTS)) {
+        if (Ctx::$user->can(ImageViewCounterPermission::SEE_IMAGE_VIEW_COUNTS)) {
             $view_count = (string)$database->get_one(
                 "SELECT COUNT(*) FROM image_views WHERE image_id =:image_id",
                 ["image_id" => $event->image->id]
@@ -74,20 +70,20 @@ class ImageViewCounter extends Extension
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
-        global $database, $config;
+        global $database;
 
-        if ($config->get_bool("image_viewcounter_installed")) {
-            $this->set_version(ImageViewCounterConfig::VERSION, 1);
-            $config->delete("image_viewcounter_installed");
+        if (Ctx::$config->get("image_viewcounter_installed") !== null) {
+            $this->set_version(1);
+            Ctx::$config->delete("image_viewcounter_installed");
         }
-        if ($this->get_version(ImageViewCounterConfig::VERSION) < 1) {
+        if ($this->get_version() < 1) {
             $database->create_table("image_views", "
                 id SCORE_AIPK,
                 image_id INTEGER NOT NULL,
                 user_id INTEGER NOT NULL,
                 timestamp INTEGER NOT NULL,
                 ipaddress SCORE_INET NOT NULL");
-            $this->set_version(ImageViewCounterConfig::VERSION, 1);
+            $this->set_version(1);
         }
     }
 
@@ -112,8 +108,8 @@ class ImageViewCounter extends Extension
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        if ($event->parent == "posts") {
-            $event->add_nav_link("sort_by_visits", new Link('popular_images'), "Popular Posts");
+        if ($event->parent === "posts") {
+            $event->add_nav_link(make_link('popular_images'), "Popular Posts");
         }
     }
 }

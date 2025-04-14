@@ -4,15 +4,14 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class RandomImage extends Extension
+final class RandomImage extends Extension
 {
+    public const KEY = "random_image";
     /** @var RandomImageTheme */
     protected Themelet $theme;
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page;
-
         if (
             $event->page_matches("random_image/{action}")
             || $event->page_matches("random_image/{action}/{search}")
@@ -29,34 +28,26 @@ class RandomImage extends Extension
             } elseif ($action === "view") {
                 send_event(new DisplayingImageEvent($image));
             } elseif ($action === "widget") {
-                $page->set_mode(PageMode::DATA);
-                $page->set_mime(MimeType::HTML);
-                $page->set_data($this->theme->build_thumb($image));
+                $page = Ctx::$page;
+                $page->set_data(MimeType::HTML, (string)$this->theme->build_thumb($image));
             }
         }
     }
 
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("Random Post");
-        $sb->add_bool_option("show_random_block", "Show Random Block: ");
-    }
-
     public function onPostListBuilding(PostListBuildingEvent $event): void
     {
-        global $config, $page;
-        if ($config->get_bool("show_random_block")) {
+        if (Ctx::$config->get(RandomImageConfig::SHOW_RANDOM_BLOCK)) {
             $image = Image::by_random($event->search_terms);
             if (!is_null($image)) {
-                $this->theme->display_random($page, $image);
+                $this->theme->display_random($image);
             }
         }
     }
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        if ($event->parent == "posts") {
-            $event->add_nav_link("posts_random", new Link('random_image/view'), "Random Post");
+        if ($event->parent === "posts") {
+            $event->add_nav_link(make_link('random_image/view'), "Random Post");
         }
     }
 }

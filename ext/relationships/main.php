@@ -4,24 +4,20 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\rawHTML;
-
-class ImageRelationshipSetEvent extends Event
+final class ImageRelationshipSetEvent extends Event
 {
-    public int $child_id;
-    public int $parent_id;
-
-    public function __construct(int $child_id, int $parent_id)
-    {
+    public function __construct(
+        public int $child_id,
+        public int $parent_id
+    ) {
         parent::__construct();
-        $this->child_id = $child_id;
-        $this->parent_id = $parent_id;
     }
 }
 
 
-class Relationships extends Extension
+final class Relationships extends Extension
 {
+    public const KEY = "relationships";
     /** @var RelationshipsTheme */
     protected Themelet $theme;
 
@@ -37,30 +33,29 @@ class Relationships extends Extension
     {
         global $database;
 
-        if ($this->get_version("ext_relationships_version") < 1) {
+        if ($this->get_version() < 1) {
             $database->execute("ALTER TABLE images ADD parent_id INT");
             $database->execute("ALTER TABLE images ADD has_children BOOLEAN DEFAULT FALSE NOT NULL");
             $database->execute("CREATE INDEX images__parent_id ON images(parent_id)");
             $database->execute("CREATE INDEX images__has_children ON images(has_children)");
-            $this->set_version("ext_relationships_version", 3);
+            $this->set_version(3);
         }
-        if ($this->get_version("ext_relationships_version") < 2) {
+        if ($this->get_version() < 2) {
             $database->execute("CREATE INDEX images__has_children ON images(has_children)");
-            $this->set_version("ext_relationships_version", 2);
+            $this->set_version(2);
         }
-        if ($this->get_version("ext_relationships_version") < 3) {
+        if ($this->get_version() < 3) {
             $database->standardise_boolean("images", "has_children");
-            $this->set_version("ext_relationships_version", 3);
+            $this->set_version(3);
         }
     }
 
     public function onImageInfoSet(ImageInfoSetEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::EDIT_IMAGE_RELATIONSHIPS)) {
-            if (isset($event->params['tags']) ? !\Safe\preg_match('/parent[=|:]/', $event->params["tags"]) : true) { //Ignore parent if tags contain parent metatag
-                if (isset($event->params["parent"]) ? ctype_digit($event->params["parent"]) : false) {
-                    send_event(new ImageRelationshipSetEvent($event->image->id, (int) $event->params["parent"]));
+        if (Ctx::$user->can(RelationshipsPermission::EDIT_IMAGE_RELATIONSHIPS)) {
+            if ($event->params['tags'] ? !\Safe\preg_match('/parent[=|:]/', $event->params->req("tags")) : true) { //Ignore parent if tags contain parent metatag
+                if ($event->params["parent"] ? int_escape($event->params["parent"]) : false) {
+                    send_event(new ImageRelationshipSetEvent($event->image->id, (int) $event->params->req("parent")));
                 } else {
                     $this->remove_parent($event->image->id);
                 }
@@ -79,13 +74,13 @@ class Relationships extends Extension
             $parentID = $matches[1];
 
             if (\Safe\preg_match("/^(any|none)$/", $parentID)) {
-                $not = ($parentID == "any" ? "NOT" : "");
+                $not = ($parentID === "any" ? "NOT" : "");
                 $event->add_querylet(new Querylet("images.parent_id IS $not NULL"));
             } else {
                 $event->add_querylet(new Querylet("images.parent_id = :pid", ["pid" => $parentID]));
             }
         } elseif ($matches = $event->matches("/^child[=|:](any|none)$/")) {
-            $not = ($matches[1] == "any" ? "=" : "!=");
+            $not = ($matches[1] === "any" ? "=" : "!=");
             $event->add_querylet(new Querylet("images.has_children $not :true", ["true" => true]));
         }
     }
@@ -108,7 +103,7 @@ class Relationships extends Extension
     {
         if ($matches = $event->matches("/^parent[=|:]([0-9]+|none)$/")) {
             $parentID = $matches[1];
-            if ($parentID == "none" || $parentID == "0") {
+            if ($parentID === "none" || $parentID === "0") {
                 $this->remove_parent($event->image_id);
             } else {
                 send_event(new ImageRelationshipSetEvent($event->image_id, (int)$parentID));
@@ -128,7 +123,7 @@ class Relationships extends Extension
     {
         global $database;
 
-        if (bool_escape($event->image['has_children'])) {
+        if ($event->image['has_children']) {
             $database->execute("UPDATE images SET parent_id = NULL WHERE parent_id = :iid", ["iid" => $event->image->id]);
         }
 
@@ -146,7 +141,7 @@ class Relationships extends Extension
             $old_parent = (int)$old_parent;
         }
 
-        if ($old_parent == $event->parent_id) {
+        if ($old_parent === $event->parent_id) {
             return;  // no change
         }
         if (!Image::by_id($event->parent_id) || !Image::by_id($event->child_id)) {
@@ -156,7 +151,7 @@ class Relationships extends Extension
         $database->execute("UPDATE images SET parent_id = :pid WHERE id = :cid", ["pid" => $event->parent_id, "cid" => $event->child_id]);
         $database->execute("UPDATE images SET has_children = :true WHERE id = :pid", ["pid" => $event->parent_id, "true" => true]);
 
-        if ($old_parent != null) {
+        if ($old_parent !== null) {
             $this->set_has_children($old_parent);
         }
     }

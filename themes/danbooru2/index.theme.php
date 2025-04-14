@@ -4,26 +4,28 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use function MicroHTML\DIV;
+
 use MicroHTML\HTMLElement;
 
-use function MicroHTML\rawHTML;
+use function MicroHTML\{INPUT,P};
 
 class Danbooru2IndexTheme extends IndexTheme
 {
     /**
      * @param Image[] $images
      */
-    public function display_page(Page $page, array $images): void
+    public function display_page(array $images): void
     {
-        $this->display_shortwiki($page);
+        $this->display_shortwiki();
 
-        $this->display_page_header($page, $images);
+        $this->display_page_header($images);
 
         $nav = $this->build_navigation($this->page_number, $this->total_pages, $this->search_terms);
-        $page->add_block(new Block("Search", $nav, "left", 0));
+        Ctx::$page->add_block(new Block("Search", $nav, "left", 0));
 
         if (count($images) > 0) {
-            $this->display_page_images($page, $images);
+            $this->display_page_images($images);
         } else {
             throw new PostNotFound("No posts were found to match the search criteria");
         }
@@ -34,15 +36,25 @@ class Danbooru2IndexTheme extends IndexTheme
      */
     protected function build_navigation(int $page_number, int $total_pages, array $search_terms): HTMLElement
     {
-        $h_search_string = count($search_terms) == 0 ? "" : html_escape(implode(" ", $search_terms));
-        $h_search_link = search_link();
-        return rawHTML("
-			<p><form action='$h_search_link' method='GET'>
-				<input name='search' type='text' value='$h_search_string' class='autocomplete_tags' placeholder=''  style='width:75%'/>
-				<input type='submit' value='Go' style='width:20%'>
-				<input type='hidden' name='q' value='post/list'>
-			</form>
-		");
+        return SHM_FORM(
+            action: search_link(),
+            method: 'GET',
+            children: [
+                P(),
+                INPUT([
+                    "name" => 'search',
+                    "type" => 'text',
+                    "value" => Tag::implode($search_terms),
+                    "class" => 'autocomplete_tags',
+                    "style" => 'width:75%'
+                ]),
+                INPUT([
+                    "type" => 'submit',
+                    "value" => 'Go',
+                    "style" => 'width:20%'
+                ]),
+            ]
+        );
     }
 
     /**
@@ -50,12 +62,10 @@ class Danbooru2IndexTheme extends IndexTheme
      */
     protected function build_table(array $images, ?string $query): HTMLElement
     {
-        $h_query = html_escape($query);
-        $table = "<div class='shm-image-list' data-query='$h_query'>";
+        $table = DIV(["class" => "shm-image-list", "data-query" => $query]);
         foreach ($images as $image) {
-            $table .= $this->build_thumb($image) . "\n";
+            $table->appendChild($this->build_thumb($image));
         }
-        $table .= "</div>";
-        return rawHTML($table);
+        return $table;
     }
 }

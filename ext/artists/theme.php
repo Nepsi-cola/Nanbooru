@@ -4,15 +4,17 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use function MicroHTML\{A, LABEL, TABLE, TBODY, TD, TEXTAREA, TH, THEAD, TR, joinHTML};
+
 use MicroHTML\HTMLElement;
 
-use function MicroHTML\{INPUT,P,rawHTML,emptyHTML};
+use function MicroHTML\{INPUT,P,emptyHTML};
 
 /**
- * @phpstan-type ArtistArtist array{id:int,artist_id:int,user_name:string,name:string,notes:string,type:string,posts:int}
- * @phpstan-type ArtistAlias array{id:int,alias_id:int,alias_name:string,alias:string}
- * @phpstan-type ArtistMember array{id:int,name:string}
- * @phpstan-type ArtistUrl array{id:int,url:string}
+ * @phpstan-import-type ArtistArtist from Artists
+ * @phpstan-import-type ArtistAlias from Artists
+ * @phpstan-import-type ArtistMember from Artists
+ * @phpstan-import-type ArtistUrl from Artists
  */
 class ArtistsTheme extends Themelet
 {
@@ -27,51 +29,50 @@ class ArtistsTheme extends Themelet
 
     public function sidebar_options(string $mode, ?int $artistID = null, bool $is_admin = false): void
     {
-        global $page, $user;
-
-        $html = "";
-
-        if ($mode == "neutral") {
-            $html = make_form(make_link("artist/new_artist"))."
-						<input type='submit' name='edit' id='edit' value='New Artist'/>
-					</form>";
+        if ($mode === "neutral") {
+            $html = SHM_SIMPLE_FORM(
+                make_link("artist/new_artist"),
+                SHM_SUBMIT("New Artist")
+            );
+            Ctx::$page->add_block(new Block("Manage Artists", $html, "left", 10));
         }
 
-        if ($mode == "editor") {
-            $html = make_form(make_link("artist/new_artist"))."
-						<input type='submit' name='edit' value='New Artist'/>
-					</form>
-
-					".make_form(make_link("artist/edit_artist"))."
-						<input type='submit' name='edit' value='Edit Artist'/>
-						<input type='hidden' name='artist_id' value='".$artistID."'>
-					</form>";
+        if ($mode === "editor") {
+            $html = [];
+            $html[] = SHM_SIMPLE_FORM(
+                make_link("artist/new_artist"),
+                SHM_SUBMIT("New Artist")
+            );
+            $html[] = SHM_SIMPLE_FORM(
+                make_link("artist/edit_artist"),
+                INPUT(["type" => "hidden", "name" => "artist_id", "value" => $artistID]),
+                SHM_SUBMIT("Edit Artist")
+            );
 
             if ($is_admin) {
-                $html .= make_form(make_link("artist/nuke_artist"))."
-							<input type='submit' name='edit' value='Delete Artist'/>
-							<input type='hidden' name='artist_id' value='".$artistID."'>
-						</form>";
+                $html[] = SHM_SIMPLE_FORM(
+                    make_link("artist/nuke_artist"),
+                    INPUT(["type" => "hidden", "name" => "artist_id", "value" => $artistID]),
+                    SHM_SUBMIT("Delete Artist")
+                );
             }
 
-            $html .= make_form(make_link("artist/add_alias"))."
-							<input type='submit' name='edit' value='Add Alias'/>
-							<input type='hidden' name='artist_id' value='".$artistID."'>
-						</form>
-
-						".make_form(make_link("artist/add_member"))."
-							<input type='submit' name='edit' value='Add Member'/>
-							<input type='hidden' name='artist_id' value='".$artistID."'>
-						</form>
-
-						".make_form(make_link("artist/add_url"))."
-							<input type='submit' name='edit' value='Add Url'/>
-							<input type='hidden' name='artist_id' value='".$artistID."'>
-						</form>";
-        }
-
-        if ($html) {
-            $page->add_block(new Block("Manage Artists", rawHTML($html), "left", 10));
+            $html[] = SHM_SIMPLE_FORM(
+                make_link("artist/add_alias"),
+                INPUT(["type" => "hidden", "name" => "artist_id", "value" => $artistID]),
+                SHM_SUBMIT("Add Alias")
+            );
+            $html[] = SHM_SIMPLE_FORM(
+                make_link("artist/add_member"),
+                INPUT(["type" => "hidden", "name" => "artist_id", "value" => $artistID]),
+                SHM_SUBMIT("Add Member")
+            );
+            $html[] = SHM_SIMPLE_FORM(
+                make_link("artist/add_url"),
+                INPUT(["type" => "hidden", "name" => "artist_id", "value" => $artistID]),
+                SHM_SUBMIT("Add URL")
+            );
+            Ctx::$page->add_block(new Block("Manage Artists", joinHTML("", $html), "left", 10));
         }
     }
 
@@ -83,8 +84,6 @@ class ArtistsTheme extends Themelet
      */
     public function show_artist_editor(array $artist, array $aliases, array $members, array $urls): void
     {
-        global $user;
-
         $artistName = $artist['name'];
         $artistNotes = $artist['notes'];
         $artistID = $artist['id'];
@@ -93,8 +92,8 @@ class ArtistsTheme extends Themelet
         $aliasesString = "";
         $aliasesIDsString = "";
         foreach ($aliases as $alias) {
-            $aliasesString .= $alias["alias_name"]." ";
-            $aliasesIDsString .= $alias["alias_id"]." ";
+            $aliasesString .= $alias["alias"]." ";
+            $aliasesIDsString .= $alias["id"]." ";
         }
         $aliasesString = rtrim($aliasesString);
         $aliasesIDsString = rtrim($aliasesIDsString);
@@ -119,43 +118,85 @@ class ArtistsTheme extends Themelet
         $urlsString = substr($urlsString, 0, strlen($urlsString) - 1);
         $urlsIDsString = rtrim($urlsIDsString);
 
-        $html = make_form(make_link("artist/edited/".$artist['id'])).'
-				<table>
-					<tr><td>Name:</td><td><input type="text" name="name" value="'.$artistName.'" />
-										  <input type="hidden" name="id" value="'.$artistID.'" /></td></tr>
-					<tr><td>Alias:</td><td><input type="text" name="aliases" value="'.$aliasesString.'" />
-										   <input type="hidden" name="aliasesIDs" value="'.$aliasesIDsString.'" /></td></tr>
-					<tr><td>Members:</td><td><input type="text" name="members" value="'.$membersString.'" />
-											 <input type="hidden" name="membersIDs" value="'.$membersIDsString.'" /></td></tr>
-					<tr><td>URLs:</td><td><textarea name="urls">'.$urlsString.'</textarea>
-										  <input type="hidden" name="urlsIDs" value="'.$urlsIDsString.'" /></td></tr>
-					<tr><td>Notes:</td><td><textarea name="notes">'.$artistNotes.'</textarea></td></tr>
-					<tr><td colspan="2"><input type="submit" value="Submit" /></td></tr>
-				</table>
-			</form>
-		';
+        $html = SHM_SIMPLE_FORM(
+            make_link("artist/edited/".$artist['id']),
+            TABLE(
+                ["class" => "form"],
+                TR(
+                    TH("Name"),
+                    TD(
+                        INPUT(["type" => "text", "name" => "name", "value" => $artistName]),
+                        INPUT(["type" => "hidden", "name" => "id", "value" => $artistID])
+                    )
+                ),
+                TR(
+                    TH("Aliases"),
+                    TD(
+                        INPUT(["type" => "text", "name" => "aliases", "value" => $aliasesString]),
+                        INPUT(["type" => "hidden", "name" => "aliasesIDs", "value" => $aliasesIDsString])
+                    )
+                ),
+                TR(
+                    TH("Members"),
+                    TD(
+                        INPUT(["type" => "text", "name" => "members", "value" => $membersString]),
+                        INPUT(["type" => "hidden", "name" => "membersIDs", "value" => $membersIDsString])
+                    )
+                ),
+                TR(
+                    TH("URLs"),
+                    TD(
+                        TEXTAREA(["name" => "urls", "value" => $urlsString]),
+                        INPUT(["type" => "hidden", "name" => "urlsIDs", "value" => $urlsIDsString])
+                    )
+                ),
+                TR(
+                    TH("Notes"),
+                    TD(TEXTAREA(["name" => "notes"], $artistNotes))
+                ),
+                TR(
+                    TD(["colspan" => 2], SHM_SUBMIT("Submit"))
+                )
+            )
+        );
 
-        global $page;
-        $page->add_block(new Block("Edit artist", rawHTML($html), "main", 10));
+        Ctx::$page->add_block(new Block("Edit artist", $html, "main", 10));
     }
 
     public function new_artist_composer(): void
     {
-        global $page, $user;
+        $html = SHM_SIMPLE_FORM(
+            make_link("artist/create"),
+            TABLE(
+                ["class" => "form"],
+                TR(
+                    TH("Name"),
+                    TD(INPUT(["type" => "text", "name" => "name"]))
+                ),
+                TR(
+                    TH("Aliases"),
+                    TD(INPUT(["type" => "text", "name" => "aliases"]))
+                ),
+                TR(
+                    TH("Members"),
+                    TD(INPUT(["type" => "text", "name" => "members"]))
+                ),
+                TR(
+                    TH("URLs"),
+                    TD(TEXTAREA(["name" => "urls"]))
+                ),
+                TR(
+                    TH("Notes"),
+                    TD(TEXTAREA(["name" => "notes"]))
+                ),
+                TR(
+                    TD(["colspan" => 2], SHM_SUBMIT("Submit"))
+                )
+            )
+        );
 
-        $html = make_form(make_link("artist/create"))."
-			<table>
-				<tr><td>Name:</td><td><input type='text' name='name' /></td></tr>
-				<tr><td>Aliases:</td><td><input type='text' name='aliases' /></td></tr>
-				<tr><td>Members:</td><td><input type='text' name='members' /></td></tr>
-				<tr><td>URLs:</td><td><textarea name='urls'></textarea></td></tr>
-				<tr><td>Notes:</td><td><textarea name='notes'></textarea></td></tr>
-				<tr><td colspan='2'><input type='submit' value='Submit' /></td></tr>
-			</table>
-		";
-
-        $page->set_title("Artists");
-        $page->add_block(new Block("Artists", rawHTML($html), "main", 10));
+        Ctx::$page->set_title("Artists");
+        Ctx::$page->add_block(new Block("Artists", $html, "main", 10));
     }
 
     /**
@@ -163,21 +204,6 @@ class ArtistsTheme extends Themelet
     */
     public function list_artists(array $artists, int $pageNumber, int $totalPages): void
     {
-        global $user, $page;
-
-        $html = "<table id='poolsList' class='zebra'>".
-            "<thead><tr>".
-            "<th>Name</th>".
-            "<th>Type</th>".
-            "<th>Last updater</th>".
-            "<th>Posts</th>";
-
-        if (!$user->is_anonymous()) {
-            $html .= "<th colspan='2'>Action</th>";
-        } // space for edit link
-
-        $html .= "</tr></thead>";
-
         $deletionLinkActionArray = [
             'artist' => 'artist/nuke/',
             'alias' => 'artist/alias/delete/',
@@ -196,98 +222,105 @@ class ArtistsTheme extends Themelet
             'member' => 'Member',
         ];
 
+        $tbody = TBODY();
         foreach ($artists as $artist) {
-            if ($artist['type'] != 'artist') {
+            if ($artist['type'] !== 'artist') {
                 $artist['name'] = str_replace("_", " ", $artist['name']);
             }
 
-            $elementLink = "<a href='".make_link("artist/view/".$artist['artist_id'])."'>".str_replace("_", " ", $artist['name'])."</a>";
-            //$artist_link = "<a href='".make_link("artist/view/".$artist['artist_id'])."'>".str_replace("_", " ", $artist['artist_name'])."</a>";
-            $user_link = "<a href='".make_link("user/".$artist['user_name'])."'>".$artist['user_name']."</a>";
-            $edit_link = "<a href='".make_link($editionLinkActionArray[$artist['type']].$artist['id'])."'>Edit</a>";
-            $del_link = "<a href='".make_link($deletionLinkActionArray[$artist['type']].$artist['id'])."'>Delete</a>";
+            $elementLink = A(["href" => make_link("artist/view/".$artist['artist_id'])], str_replace("_", " ", $artist['name']));
+            $user_link = A(["href" => make_link("user/".$artist['user_name'])], $artist['user_name']);
+            $edit_link = A(["href" => make_link($editionLinkActionArray[$artist['type']].$artist['id'])], "Edit");
+            $del_link = A(["href" => make_link($deletionLinkActionArray[$artist['type']].$artist['id'])], "Delete");
 
-            $html .= "<tr>".
-                "<td class='left'>".$elementLink;
-
-            //if ($artist['type'] == 'member')
-            //	$html .= " (member of ".$artist_link.")";
-
-            //if ($artist['type'] == 'alias')
-            //	$html .= " (alias for ".$artist_link.")";
-
-            $html .= "</td>".
-                "<td>".$typeTextArray[$artist['type']]."</td>".
-                "<td>".$user_link."</td>".
-                "<td>".$artist['posts']."</td>";
-
-            if (!$user->is_anonymous()) {
-                $html .= "<td>".$edit_link."</td>";
-            }
-            if ($user->can(Permissions::ARTISTS_ADMIN)) {
-                $html .= "<td>".$del_link."</td>";
-            }
-
-            $html .= "</tr>";
+            $tbody->appendChild(TR(
+                TD(["class" => "left"], $elementLink),
+                TD($typeTextArray[$artist['type']]),
+                TD($user_link),
+                TD($artist['posts']),
+                Ctx::$user->can(ArtistsPermission::EDIT_ARTIST_INFO) ? TD($edit_link) : null,
+                Ctx::$user->can(ArtistsPermission::ADMIN) ? TD($del_link) : null,
+            ));
         }
 
-        $html .= "</tbody></table>";
+        $html = TABLE(
+            ["id" => "poolsList", "class" => "zebra"],
+            THEAD(
+                TR(
+                    TH("Name"),
+                    TH("Type"),
+                    TH("Last updater"),
+                    TH("Posts"),
+                    Ctx::$user->can(ArtistsPermission::EDIT_ARTIST_INFO) ? TH(["colspan" => "2"], "Action") : null
+                )
+            ),
+            $tbody
+        );
 
+        $page = Ctx::$page;
         $page->set_title("Artists");
-        $page->add_block(new Block("Artists", rawHTML($html), "main", 10));
-
-        $this->display_paginator($page, "artist/list", null, $pageNumber, $totalPages);
+        $page->add_block(new Block("Artists", $html, "main", 10));
+        $this->display_paginator("artist/list", null, $pageNumber, $totalPages);
     }
 
     public function show_new_alias_composer(int $artistID): void
     {
-        global $user;
-
-        $html = make_form(make_link("artist/alias/add")).'
-				  <table>
-					<tr><td>Alias:</td><td><input type="text" name="aliases" />
-										   <input type="hidden" name="artistID" value='.$artistID.' /></td></tr>
-					<tr><td colspan="2"><input type="submit" value="Submit" /></td></tr>
-				</table>
-			</form>
-		';
-
-        global $page;
-        $page->add_block(new Block("Artist Aliases", rawHTML($html), "main", 20));
+        $html = SHM_SIMPLE_FORM(
+            make_link("artist/alias/add"),
+            TABLE(
+                TR(
+                    TH("Alias"),
+                    TD(
+                        INPUT(["type" => "text", "name" => "aliases"]),
+                        INPUT(["type" => "hidden", "name" => "artistID", "value" => $artistID])
+                    )
+                ),
+                TR(
+                    TD(["colspan" => 2], SHM_SUBMIT("Submit"))
+                )
+            )
+        );
+        Ctx::$page->add_block(new Block("Artist Aliases", $html, "main", 20));
     }
 
     public function show_new_member_composer(int $artistID): void
     {
-        global $user;
-
-        $html = make_form(make_link("artist/member/add")).'
-				<table>
-					<tr><td>Members:</td><td><input type="text" name="members" />
-										   <input type="hidden" name="artistID" value='.$artistID.' /></td></tr>
-					<tr><td colspan="2"><input type="submit" value="Submit" /></td></tr>
-				</table>
-			</form>
-		';
-
-        global $page;
-        $page->add_block(new Block("Artist members", rawHTML($html), "main", 30));
+        $html = SHM_SIMPLE_FORM(
+            make_link("artist/member/add"),
+            TABLE(
+                TR(
+                    TH("Members"),
+                    TD(
+                        INPUT(["type" => "text", "name" => "members"]),
+                        INPUT(["type" => "hidden", "name" => "artistID", "value" => $artistID])
+                    )
+                ),
+                TR(
+                    TD(["colspan" => 2], SHM_SUBMIT("Submit"))
+                )
+            )
+        );
+        Ctx::$page->add_block(new Block("Artist members", $html, "main", 30));
     }
 
     public function show_new_url_composer(int $artistID): void
     {
-        global $user;
-
-        $html = make_form(make_link("artist/url/add")).'
-				<table>
-					<tr><td>URL:</td><td><textarea name="urls"></textarea>
-									   <input type="hidden" name="artistID" value='.$artistID.' /></td></tr>
-					<tr><td colspan="2"><input type="submit" value="Submit" /></td></tr>
-				</table>
-			</form>
-		';
-
-        global $page;
-        $page->add_block(new Block("Artist URLs", rawHTML($html), "main", 40));
+        $html = SHM_SIMPLE_FORM(
+            make_link("artist/url/add"),
+            TABLE(
+                TR(
+                    TH("URLs"),
+                    TD(
+                        INPUT(["type" => "text", "name" => "urls"]),
+                        INPUT(["type" => "hidden", "name" => "artistID", "value" => $artistID])
+                    )
+                ),
+                TR(
+                    TD(["colspan" => 2], SHM_SUBMIT("Submit"))
+                )
+            )
+        );
+        Ctx::$page->add_block(new Block("Artist URLs", $html, "main", 40));
     }
 
     /**
@@ -295,18 +328,14 @@ class ArtistsTheme extends Themelet
      */
     public function show_alias_editor(array $alias): void
     {
-        global $user;
-
-        $html = make_form(make_link("artist/alias/edited/".$alias['id'])).'
-				<label for="alias">Alias:</label>
-				<input type="text" name="alias" id="alias" value="'.$alias['alias'].'" />
-				<input type="hidden" name="aliasID" value="'.$alias['id'].'" />
-				<input type="submit" value="Submit" />
-			</form>
-		';
-
-        global $page;
-        $page->add_block(new Block("Edit Alias", rawHTML($html), "main", 10));
+        $html = SHM_SIMPLE_FORM(
+            make_link("artist/alias/edited/".$alias['id']),
+            LABEL(["for" => "alias"], "Alias:"),
+            INPUT(["type" => "text", "name" => "alias", "id" => "alias", "value" => $alias['alias']]),
+            INPUT(["type" => "hidden", "name" => "aliasID", "value" => $alias['id']]),
+            SHM_SUBMIT("Submit")
+        );
+        Ctx::$page->add_block(new Block("Edit Alias", $html, "main", 10));
     }
 
     /**
@@ -314,18 +343,14 @@ class ArtistsTheme extends Themelet
      */
     public function show_url_editor(array $url): void
     {
-        global $user;
-
-        $html = make_form(make_link("artist/url/edited/".$url['id'])).'
-				<label for="url">URL:</label>
-				<input type="text" name="url" id="url" value="'.$url['url'].'" />
-				<input type="hidden" name="urlID" value="'.$url['id'].'" />
-				<input type="submit" value="Submit" />
-			</form>
-		';
-
-        global $page;
-        $page->add_block(new Block("Edit URL", rawHTML($html), "main", 10));
+        $html = SHM_SIMPLE_FORM(
+            make_link("artist/url/edited/".$url['id']),
+            LABEL(["for" => "url"], "URL:"),
+            INPUT(["type" => "text", "name" => "url", "id" => "url", "value" => $url['url']]),
+            INPUT(["type" => "hidden", "name" => "urlID", "value" => $url['id']]),
+            SHM_SUBMIT("Submit")
+        );
+        Ctx::$page->add_block(new Block("Edit URL", $html, "main", 10));
     }
 
     /**
@@ -333,18 +358,14 @@ class ArtistsTheme extends Themelet
      */
     public function show_member_editor(array $member): void
     {
-        global $user;
-
-        $html = make_form(make_link("artist/member/edited/".$member['id'])).'
-				<label for="name">Member name:</label>
-				<input type="text" name="name" id="name" value="'.$member['name'].'" />
-				<input type="hidden" name="memberID" value="'.$member['id'].'" />
-				<input type="submit" value="Submit" />
-			</form>
-		';
-
-        global $page;
-        $page->add_block(new Block("Edit Member", rawHTML($html), "main", 10));
+        $html = SHM_SIMPLE_FORM(
+            make_link("artist/member/edited/".$member['id']),
+            LABEL(["for" => "name"], "Member name:"),
+            INPUT(["type" => "text", "name" => "name", "id" => "name", "value" => $member['name']]),
+            INPUT(["type" => "hidden", "name" => "memberID", "value" => $member['id']]),
+            SHM_SUBMIT("Submit")
+        );
+        Ctx::$page->add_block(new Block("Edit Member", $html, "main", 10));
     }
 
     /**
@@ -356,69 +377,21 @@ class ArtistsTheme extends Themelet
      */
     public function show_artist(array $artist, array $aliases, array $members, array $urls, array $images, bool $userIsLogged, bool $userIsAdmin): void
     {
-        global $page;
+        $html = TABLE(
+            ["id" => "poolsList", "class" => "zebra"],
+            TR(TH("Name"), TD(A(["href" => search_link([$artist['name']])], str_replace("_", " ", $artist['name'])))),
+            $this->render_aliases($aliases, $userIsLogged, $userIsAdmin),
+            $this->render_members($members, $userIsLogged, $userIsAdmin),
+            $this->render_urls($urls, $userIsLogged, $userIsAdmin),
+            TR(TH("Notes"), TD($artist["notes"])),
+        );
 
-        $artist_link = "<a href='".search_link([$artist['name']])."'>".str_replace("_", " ", $artist['name'])."</a>";
-
-        $html = "<table id='poolsList' class='zebra'>
-					<thead>
-						<tr>
-							<th></th>
-							<th></th>";
-
-        if ($userIsLogged) {
-            $html .= "<th></th>";
-        }
-        if ($userIsAdmin) {
-            $html .= "<th></th>";
-        }
-
-        $html .= "  <tr>
-					</thead>
-
-					<tr>
-						<td class='left'>Name:</td>
-						<td class='left'>".$artist_link."</td>";
-        if ($userIsLogged) {
-            $html .= "<td></td>";
-        }
-        if ($userIsAdmin) {
-            $html .= "<td></td>";
-        }
-        $html .= "</tr>";
-
-        $html .= $this->render_aliases($aliases, $userIsLogged, $userIsAdmin);
-        $html .= $this->render_members($members, $userIsLogged, $userIsAdmin);
-        $html .= $this->render_urls($urls, $userIsLogged, $userIsAdmin);
-
-        $html .= "<tr>
-						<td class='left'>Notes:</td>
-						<td class='left'>".$artist["notes"]."</td>";
-        if ($userIsLogged) {
-            $html .= "<td></td>";
-        }
-        if ($userIsAdmin) {
-            $html .= "<td></td>";
-        }
-        //TODO how will notes be edited? On edit artist? (should there be an editartist?) or on a editnotes?
-        //same question for deletion
-        $html .= "</tr>
-		</table>";
-
+        $page = Ctx::$page;
         $page->set_title("Artist");
-        $page->add_block(new Block("Artist", rawHTML($html), "main", 10));
+        $page->add_block(new Block("Artist", $html, "main", 10));
 
-        //we show the images for the artist
-        $artist_images = "";
-        foreach ($images as $image) {
-            $thumb_html = $this->build_thumb($image);
-
-            $artist_images .= '<span class="thumb">'.
-                '<a href="$image_link">'.$thumb_html.'</a>'.
-                '</span>';
-        }
-
-        $page->add_block(new Block("Artist Posts", rawHTML($artist_images), "main", 20));
+        $images = array_map(fn ($image) => $this->build_thumb($image), $images);
+        $page->add_block(new Block("Artist Posts", joinHTML(" ", $images), "main", 20));
     }
 
     /**
@@ -428,9 +401,9 @@ class ArtistsTheme extends Themelet
     {
         $html = "";
         if (count($aliases) > 0) {
-            $aliasViewLink = str_replace("_", " ", $aliases[0]['alias_name']); // no link anymore
-            $aliasEditLink = "<a href='" . make_link("artist/alias/edit/" . $aliases[0]['alias_id']) . "'>Edit</a>";
-            $aliasDeleteLink = "<a href='" . make_link("artist/alias/delete/" . $aliases[0]['alias_id']) . "'>Delete</a>";
+            $aliasViewLink = str_replace("_", " ", $aliases[0]['alias']); // no link anymore
+            $aliasEditLink = "<a href='" . make_link("artist/alias/edit/" . $aliases[0]['id']) . "'>Edit</a>";
+            $aliasDeleteLink = "<a href='" . make_link("artist/alias/delete/" . $aliases[0]['id']) . "'>Delete</a>";
 
             $html .= "<tr>
 							  <td class='left'>Aliases:</td>
@@ -449,12 +422,12 @@ class ArtistsTheme extends Themelet
             if (count($aliases) > 1) {
                 $ac = count($aliases);
                 for ($i = 1; $i < $ac; $i++) {
-                    $aliasViewLink = str_replace("_", " ", $aliases[$i]['alias_name']); // no link anymore
-                    $aliasEditLink = "<a href='" . make_link("artist/alias/edit/" . $aliases[$i]['alias_id']) . "'>Edit</a>";
-                    $aliasDeleteLink = "<a href='" . make_link("artist/alias/delete/" . $aliases[$i]['alias_id']) . "'>Delete</a>";
+                    $aliasViewLink = str_replace("_", " ", $aliases[$i]['alias']); // no link anymore
+                    $aliasEditLink = "<a href='" . make_link("artist/alias/edit/" . $aliases[$i]['id']) . "'>Edit</a>";
+                    $aliasDeleteLink = "<a href='" . make_link("artist/alias/delete/" . $aliases[$i]['id']) . "'>Delete</a>";
 
                     $html .= "<tr>
-									  <td class='left'>&nbsp;</td>
+									  <td class='left'></td>
 									  <td class='left'>" . $aliasViewLink . "</td>";
                     if ($userIsLogged) {
                         $html .= "<td class='left'>" . $aliasEditLink . "</td>";
@@ -501,7 +474,7 @@ class ArtistsTheme extends Themelet
                     $memberDeleteLink = "<a href='" . make_link("artist/member/delete/" . $members[$i]['id']) . "'>Delete</a>";
 
                     $html .= "<tr>
-							<td class='left'>&nbsp;</td>
+							<td class='left'></td>
 							<td class='left'>" . $memberViewLink . "</td>";
                     if ($userIsLogged) {
                         $html .= "<td class='left'>" . $memberEditLink . "</td>";
@@ -550,7 +523,7 @@ class ArtistsTheme extends Themelet
                     $urlDeleteLink = "<a href='" . make_link("artist/url/delete/" . $urls[$i]['id']) . "'>Delete</a>";
 
                     $html .= "<tr>
-								<td class='left'>&nbsp;</td>
+								<td class='left'></td>
 								<td class='left'>" . $urlViewLink . "</td>";
                     if ($userIsLogged) {
                         $html .= "<td class='left'>" . $urlEditLink . "</td>";
@@ -572,7 +545,7 @@ class ArtistsTheme extends Themelet
     {
         return emptyHTML(
             P("Search for posts with a particular artist."),
-            SHM_COMMAND_EXAMPLE("artist=leonardo", "Returns posts with the artist \"leonardo\".")
+            SHM_COMMAND_EXAMPLE("artist=leonardo", "Returns posts with the artist \"leonardo\"")
         );
     }
 }

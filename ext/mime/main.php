@@ -4,23 +4,16 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\rawHTML;
-
-require_once "mime_map.php";
-require_once "file_extension.php";
-require_once "mime_type.php";
-
-class MimeSystem extends Extension
+final class MimeSystem extends Extension
 {
+    public const KEY = "mime";
     /** @var MimeSystemTheme */
     protected Themelet $theme;
-
-    public const VERSION = "ext_mime_version";
 
     public function onParseLinkTemplate(ParseLinkTemplateEvent $event): void
     {
         $event->replace('$ext', $event->image->get_ext());
-        $event->replace('$mime', $event->image->get_mime());
+        $event->replace('$mime', (string)$event->image->get_mime());
     }
 
 
@@ -31,7 +24,7 @@ class MimeSystem extends Extension
         // These upgrades are primarily for initializing mime types on upgrade, and for adjusting mime types whenever an
         // adjustment needs to be made to the mime types.
 
-        if ($this->get_version(self::VERSION) < 1) {
+        if ($this->get_version() < 1) {
             if ($database->is_transaction_open()) {
                 // Each of these commands could hit a lot of data, combining
                 // them into one big transaction would not be a good idea.
@@ -39,12 +32,13 @@ class MimeSystem extends Extension
             }
             $database->set_timeout(null); // These updates can take a little bit
 
-            $extensions = $database->get_col_iterable("SELECT DISTINCT ext FROM images");
+            /** @var string[] $extensions */
+            $extensions = $database->get_col("SELECT DISTINCT ext FROM images");
 
             foreach ($extensions as $ext) {
                 $mime = MimeType::get_for_extension($ext);
 
-                if (empty($mime) || $mime === MimeType::OCTET_STREAM) {
+                if (is_null($mime) || $mime->base === MimeType::OCTET_STREAM) {
                     throw new UserError("Unknown extension: $ext");
                 }
 
@@ -52,11 +46,11 @@ class MimeSystem extends Extension
 
                 $database->execute(
                     "UPDATE images SET mime = :mime, ext = :new_ext WHERE ext = :ext AND (mime IS NULL OR mime != :mime OR ext != :new_ext)",
-                    ["mime" => $mime, "new_ext" => $normalized_extension, "ext" => $ext]
+                    ["mime" => (string)$mime, "new_ext" => $normalized_extension, "ext" => $ext]
                 );
             }
 
-            $this->set_version(self::VERSION, 1);
+            $this->set_version(1);
             $database->begin_transaction();
         }
     }

@@ -4,25 +4,17 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class TagCategories extends Extension
+final class TagCategories extends Extension
 {
+    public const KEY = "tag_categories";
     /** @var TagCategoriesTheme */
     protected Themelet $theme;
-
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-
-        // whether we split out separate categories on post view by default
-        //  note: only takes effect if /post/view shows the image's exact tags
-        $config->set_default_bool(TagCategoriesConfig::SPLIT_ON_VIEW, true);
-    }
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;
 
-        if ($this->get_version(TagCategoriesConfig::VERSION) < 1) {
+        if ($this->get_version() < 1) {
             // primary extension database, holds all our stuff!
             $database->create_table(
                 'image_tag_categories',
@@ -32,15 +24,13 @@ class TagCategories extends Extension
 				color VARCHAR(7)'
             );
 
-            $this->set_version(TagCategoriesConfig::VERSION, 1);
-
-            log_info("tag_categories", "extension installed");
+            $this->set_version(1);
         }
 
         // if empty, add our default values
-        $number_of_db_rows = $database->execute('SELECT COUNT(*) FROM image_tag_categories;')->fetchColumn();
+        $number_of_db_rows = $database->get_one('SELECT COUNT(*) FROM image_tag_categories');
 
-        if ($number_of_db_rows == 0) {
+        if ($number_of_db_rows === 0) {
             $database->execute(
                 'INSERT INTO image_tag_categories VALUES (:category, :single, :multiple, :color)',
                 ["category" => "artist", "single" => "Artist", "multiple" => "Artists", "color" => "#BB6666"]
@@ -58,22 +48,21 @@ class TagCategories extends Extension
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        if ($event->parent == "tags") {
-            $event->add_nav_link("tag_categories", new Link('tags/categories'), "Tag Categories", NavLink::is_active(["tag_categories"]));
+        if ($event->parent === "tags") {
+            $event->add_nav_link(make_link('tags/categories'), "Tag Categories", ["tag_categories"]);
         }
     }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $database, $page, $user;
-
         if ($event->page_matches("tags/categories", method: "GET")) {
-            $this->theme->show_tag_categories($page, $database->get_all('SELECT * FROM image_tag_categories'));
+            /** @var array<array{category: string, display_singular: string, display_multiple: string, color: string}> $tcs */
+            $tcs = Ctx::$database->get_all('SELECT * FROM image_tag_categories');
+            $this->theme->show_tag_categories($tcs);
         }
-        if ($event->page_matches("tags/categories", method: "POST", permission: Permissions::EDIT_TAG_CATEGORIES)) {
+        if ($event->page_matches("tags/categories", method: "POST", permission: TagCategoriesPermission::EDIT_TAG_CATEGORIES)) {
             $this->page_update();
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link("tags/categories"));
+            Ctx::$page->set_redirect(make_link("tags/categories"));
         }
     }
 
@@ -174,7 +163,7 @@ class TagCategories extends Extension
 
     public function page_update(): void
     {
-        global $user, $database;
+        global $database;
 
         if (!isset($_POST['tc_status']) and
            !isset($_POST['tc_category']) and
@@ -184,7 +173,7 @@ class TagCategories extends Extension
             return;
         }
 
-        if ($_POST['tc_status'] == 'edit') {
+        if ($_POST['tc_status'] === 'edit') {
             $database->execute(
                 'UPDATE image_tag_categories
 				SET display_singular=:display_singular,
@@ -198,7 +187,7 @@ class TagCategories extends Extension
                     'color' => $_POST['tc_color'],
                 ]
             );
-        } elseif ($_POST['tc_status'] == 'new') {
+        } elseif ($_POST['tc_status'] === 'new') {
             $database->execute(
                 'INSERT INTO image_tag_categories
 				VALUES (:category, :display_singular, :display_multiple, :color)',
@@ -209,7 +198,7 @@ class TagCategories extends Extension
                     'color' => $_POST['tc_color'],
                 ]
             );
-        } elseif ($_POST['tc_status'] == 'delete') {
+        } elseif ($_POST['tc_status'] === 'delete') {
             $database->execute(
                 'DELETE FROM image_tag_categories
 				WHERE category=:category',

@@ -4,18 +4,19 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\{emptyHTML, rawHTML, TITLE, LINK};
+use function MicroHTML\{B, DIV, H3, INPUT, LABEL, SECTION, SPAN, TABLE, TD, TH, TR};
+use function MicroHTML\{LINK, TITLE, emptyHTML};
 
 class DowntimeTheme extends Themelet
 {
     /**
      * Show the admin that downtime mode is enabled
      */
-    public function display_notification(Page $page): void
+    public function display_notification(): void
     {
-        $page->add_block(new Block(
+        Ctx::$page->add_block(new Block(
             "Downtime",
-            rawHTML("<span style='font-size: 1.5rem; text-align: center;'><b>DOWNTIME MODE IS ON!</b></span>"),
+            SPAN(["style" => "font-size: 1.5rem; text-align: center;"], B("DOWNTIME MODE IS ON!")),
             "left",
             0
         ));
@@ -26,46 +27,45 @@ class DowntimeTheme extends Themelet
      */
     public function display_message(string $message): void
     {
-        global $config, $user, $page;
-        $theme_name = $config->get_string(SetupConfig::THEME);
-        $data_href = get_base_href();
-        $login_link = make_link("user_admin/login");
-        $form = make_form($login_link);
+        $theme_name = Ctx::$config->get(SetupConfig::THEME);
 
         $head = emptyHTML(
             TITLE("Downtime"),
-            LINK(["rel" => "stylesheet", "href" => "$data_href/themes/$theme_name/style.css", "type" => "text/css"])
+            LINK(["rel" => "stylesheet", "href" => Url::base() . "/ext/static_files/style.css", "type" => "text/css"]),
+            LINK(["rel" => "stylesheet", "href" => Url::base() . "/themes/$theme_name/style.css", "type" => "text/css"]),
         );
-        $body = rawHTML(<<<EOD
-<div id="downtime">
-	<section>
-		<h1 style="text-align: center;">Down for Maintenance</h1>
-		<div id="message" class="blockbody">
-			$message
-		</div>
-	</section>
-	<section>
-		<h3>Admin Login</h3>
-		<div id="login" class="blockbody">
-			$form
-				<table id="login_table" summary="Login Form">
-					<tr>
-						<td width="70"><label for="user">Name</label></td>
-						<td width="70"><input id="user" type="text" name="user"></td>
-					</tr>
-					<tr>
-						<td><label for="pass">Password</label></td>
-						<td><input id="pass" type="password" name="pass"></td>
-					</tr>
-					<tr><td colspan="2"><input type="submit" value="Log In"></td></tr>
-				</table>
-			</form>
-		</div>
-	</section>
-</div>
-EOD);
-        $page->set_mode(PageMode::DATA);
-        $page->set_code(503);
-        $page->set_data((string)$page->html_html($head, $body));
+        $body = DIV(
+            ["id" => "downtime"],
+            SECTION(
+                H3(["style" => "text-align: center;"], "Down for Maintenance"),
+                DIV(["id" => "message", "class" => "blockbody"], $message)
+            ),
+            SECTION(
+                H3("Admin Login"),
+                DIV(
+                    ["id" => "login", "class" => "blockbody"],
+                    SHM_SIMPLE_FORM(
+                        make_link("user_admin/login"),
+                        TABLE(
+                            ["class" => "form"],
+                            TR(
+                                TH(["width" => "70"], LABEL(["for" => "user"], "Name")),
+                                TD(["width" => "70"], INPUT(["id" => "user", "type" => "text", "name" => "user"]))
+                            ),
+                            TR(
+                                TH(LABEL(["for" => "pass"], "Password")),
+                                TD(INPUT(["id" => "pass", "type" => "password", "name" => "pass"]))
+                            ),
+                            TR(
+                                TD(["colspan" => "2"], SHM_SUBMIT("Log In"))
+                            )
+                        )
+                    ),
+                )
+            )
+        );
+
+        Ctx::$page->set_code(503);
+        Ctx::$page->set_data(MimeType::HTML, (string)Ctx::$page->html_html($head, $body));
     }
 }

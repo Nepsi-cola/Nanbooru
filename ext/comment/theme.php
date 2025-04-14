@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\rawHTML;
+use function MicroHTML\{A, BR, DIV, INPUT, P, SPAN, SUP, TABLE, TD, TEXTAREA, TH, TR, emptyHTML};
+
+use MicroHTML\HTMLElement;
 
 class CommentListTheme extends Themelet
 {
@@ -20,40 +22,29 @@ class CommentListTheme extends Themelet
      */
     public function display_comment_list(array $images, int $page_number, int $total_pages, bool $can_post): void
     {
-        global $config, $page, $user;
-
-        // parts for the whole page
-        $prev = $page_number - 1;
-        $next = $page_number + 1;
-
-        $h_prev = ($page_number <= 1) ? "Prev" :
-            '<a href="'.make_link('comment/list/'.$prev).'">Prev</a>';
-        $h_index = "<a href='".make_link()."'>Index</a>";
-        $h_next = ($page_number >= $total_pages) ? "Next" :
-            '<a href="'.make_link('comment/list/'.$next).'">Next</a>';
-
-        $nav = $h_prev.' | '.$h_index.' | '.$h_next;
-
+        $page = Ctx::$page;
         $page->set_title("Comments");
-        $page->add_block(new Block("Navigation", rawHTML($nav), "left", 0));
-        $this->display_paginator($page, "comment/list", null, $page_number, $total_pages);
+        $this->display_navigation([
+            make_link('comment/list/'.($page_number - 1)),
+            make_link(),
+            make_link('comment/list/'.($page_number + 1))
+        ]);
+        $this->display_paginator("comment/list", null, $page_number, $total_pages);
 
         // parts for each image
         $position = 10;
 
-        $comment_limit = $config->get_int(CommentConfig::LIST_COUNT, 10);
-        $comment_captcha = $config->get_bool(CommentConfig::CAPTCHA);
+        $comment_limit = Ctx::$config->get(CommentConfig::LIST_COUNT);
 
         foreach ($images as $pair) {
             $image = $pair[0];
             $comments = $pair[1];
 
-            $thumb_html = $this->build_thumb($image);
-            $comment_html = "";
+            $comment_html = emptyHTML();
 
             $comment_count = count($comments);
             if ($comment_limit > 0 && $comment_count > $comment_limit) {
-                $comment_html .= "<p>showing $comment_limit of $comment_count comments</p>";
+                $comment_html->appendChild(P("showing $comment_limit of $comment_count comments"));
                 $comments = array_slice($comments, negative_int($comment_limit));
                 $this->show_anon_id = false;
             } else {
@@ -61,49 +52,41 @@ class CommentListTheme extends Themelet
             }
             $this->anon_id = 1;
             foreach ($comments as $comment) {
-                $comment_html .= $this->comment_to_html($comment);
+                $comment_html->appendChild($this->comment_to_html($comment));
             }
-            if (!$user->is_anonymous()) {
-                if ($can_post) {
-                    $comment_html .= $this->build_postbox($image->id);
-                }
-            } else {
-                if ($can_post) {
-                    if (!$comment_captcha) {
-                        $comment_html .= $this->build_postbox($image->id);
-                    } else {
-                        $link = make_link("post/view/".$image->id);
-                        $comment_html .= "<a href='$link'>Add Comment</a>";
-                    }
-                }
-            }
+            $comment_html->appendChild($this->build_postbox($image->id));
 
-            $html  = '
-				<div class="comment_big_list">
-					'.$thumb_html.'
-					<div class="comment_list">'.$comment_html.'</div>
-				</div>
-			';
+            $html = DIV(
+                ["class" => "comment_big_list"],
+                $this->build_thumb($image),
+                DIV(["class" => "comment_list"], $comment_html)
+            );
 
-            $page->add_block(new Block($image->id.': '.$image->get_tag_list(), rawHTML($html), "main", $position++, "comment-list-list"));
+            $page->add_block(new Block($image->id.': '.$image->get_tag_list(), $html, "main", $position++, "comment-list-list"));
         }
     }
 
     public function display_admin_block(): void
     {
-        global $page;
-
-        $html = '
-			Delete comments by IP.
-
-			<br><br>'.make_form(make_link("comment/bulk_delete"))."
-				<table class='form'>
-					<tr><th>IP&nbsp;Address</th> <td><input type='text' name='ip' size='15'></td></tr>
-					<tr><td colspan='2'><input type='submit' value='Delete'></td></tr>
-				</table>
-			</form>
-		";
-        $page->add_block(new Block("Mass Comment Delete", rawHTML($html)));
+        $html = DIV(
+            "Delete comments by IP.",
+            BR(),
+            BR(),
+            SHM_SIMPLE_FORM(
+                make_link("comment/bulk_delete"),
+                TABLE(
+                    ["class" => "form"],
+                    TR(
+                        TH("IP Address"),
+                        TD(INPUT(["type" => "text", "name" => "ip", "size" => 15]))
+                    ),
+                    TR(
+                        TD(["colspan" => 2], INPUT(["type" => "submit", "value" => "Delete"]))
+                    )
+                )
+            )
+        );
+        Ctx::$page->add_block(new Block("Mass Comment Delete", $html));
     }
 
     /**
@@ -113,14 +96,13 @@ class CommentListTheme extends Themelet
      */
     public function display_recent_comments(array $comments): void
     {
-        global $page;
         $this->show_anon_id = false;
-        $html = "";
+        $html = emptyHTML();
         foreach ($comments as $comment) {
-            $html .= $this->comment_to_html($comment, true);
+            $html->appendChild($this->comment_to_html($comment, true));
         }
-        $html .= "<a class='more' href='".make_link("comment/list")."'>Full List</a>";
-        $page->add_block(new Block("Comments", rawHTML($html), "left", 70, "comment-list-recent"));
+        $html->appendChild(A(["class" => "more", "href" => make_link("comment/list")], "Full List"));
+        Ctx::$page->add_block(new Block("Comments", $html, "left", 70, "comment-list-recent"));
     }
 
     /**
@@ -130,16 +112,15 @@ class CommentListTheme extends Themelet
      */
     public function display_image_comments(Image $image, array $comments, bool $postbox): void
     {
-        global $page;
         $this->show_anon_id = true;
-        $html = "";
+        $html = emptyHTML();
         foreach ($comments as $comment) {
-            $html .= $this->comment_to_html($comment);
+            $html->appendChild($this->comment_to_html($comment));
         }
         if ($postbox) {
-            $html .= $this->build_postbox($image->id);
+            $html->appendChild($this->build_postbox($image->id));
         }
-        $page->add_block(new Block("Comments", rawHTML($html), "main", 30, "comment-list-image"));
+        Ctx::$page->add_block(new Block("Comments", $html, "main", 30, "comment-list-image"));
     }
 
     /**
@@ -149,17 +130,16 @@ class CommentListTheme extends Themelet
      */
     public function display_recent_user_comments(array $comments, User $user): void
     {
-        global $page;
-        $html = "";
+        $html = emptyHTML();
         foreach ($comments as $comment) {
-            $html .= $this->comment_to_html($comment, true);
+            $html->appendChild($this->comment_to_html($comment, true));
         }
-        if (empty($html)) {
-            $html = '<p>No comments by this user.</p>';
+        if (count($comments) === 0) {
+            $html->appendChild(P("No comments by this user."));
         } else {
-            $html .= "<p><a href='".make_link("comment/beta-search/{$user->name}/1")."'>More</a></p>";
+            $html->appendChild(P(A(["href" => make_link("comment/beta-search/{$user->name}/1")], "More")));
         }
-        $page->add_block(new Block("Comments", rawHTML($html), "left", 70, "comment-list-user"));
+        Ctx::$page->add_block(new Block("Comments", $html, "left", 70, "comment-list-user"));
     }
 
     /**
@@ -167,156 +147,118 @@ class CommentListTheme extends Themelet
      */
     public function display_all_user_comments(array $comments, int $page_number, int $total_pages, User $user): void
     {
-        global $page;
-
-        $html = "";
+        $html = emptyHTML();
         foreach ($comments as $comment) {
-            $html .= $this->comment_to_html($comment, true);
+            $html->appendChild($this->comment_to_html($comment, true));
         }
-        if (empty($html)) {
-            $html = '<p>No comments by this user.</p>';
+        if (count($comments) === 0) {
+            $html->appendChild(P("No comments by this user."));
         }
-        $page->add_block(new Block("Comments", rawHTML($html), "main", 70, "comment-list-user"));
-
-
-        $prev = $page_number - 1;
-        $next = $page_number + 1;
-
-        //$search_terms = array('I','have','no','idea','what','this','does!');
-        //$u_tags = url_escape(Tag::implode($search_terms));
-        //$query = empty($u_tags) ? "" : '/'.$u_tags;
-
-        $h_prev = ($page_number <= 1) ? "Prev" : "<a href='$prev'>Prev</a>";
-        $h_index = "<a href='".make_link()."'>Index</a>";
-        $h_next = ($page_number >= $total_pages) ? "Next" : "<a href='$next'>Next</a>";
-
-        $page->set_title("{$user->name}'s comments");
-        $page->add_block(new Block("Navigation", rawHTML($h_prev.' | '.$h_index.' | '.$h_next), "left", 0));
-        $this->display_paginator($page, "comment/beta-search/{$user->name}", null, $page_number, $total_pages);
+        Ctx::$page->add_block(new Block("Comments", $html, "main", 70, "comment-list-user"));
+        Ctx::$page->set_title("{$user->name}'s comments");
+        $this->display_navigation([
+            ($page_number <= 1) ? null : make_link("comment/beta-search/{$user->name}/" . ($page_number - 1)),
+            make_link(),
+            ($page_number >= $total_pages) ? null : make_link("comment/beta-search/{$user->name}/" . ($page_number + 1)),
+        ]);
+        $this->display_paginator("comment/beta-search/{$user->name}", null, $page_number, $total_pages);
     }
 
-    protected function comment_to_html(Comment $comment, bool $trim = false): string
+    protected function comment_to_html(Comment $comment, bool $trim = false): HTMLElement
     {
-        global $config, $user;
-
-        $tfe = send_event(new TextFormattingEvent($comment->comment));
-
-        $i_uid = $comment->owner_id;
-        $h_name = html_escape($comment->owner_name);
-        $h_timestamp = autodate($comment->posted);
-        if ($trim) {
-            $h_comment = truncate($tfe->stripped, 50);
-        } else {
-            $h_comment = $tfe->formatted;
-        }
-        $i_comment_id = $comment->comment_id;
-        $i_image_id = $comment->image_id;
-
-        if ($i_uid == $config->get_int("anon_id")) {
+        if ($comment->owner_id === Ctx::$config->get(UserAccountsConfig::ANON_ID)) {
             $anoncode = "";
             $anoncode2 = "";
             if ($this->show_anon_id) {
-                $anoncode = '<sup>'.$this->anon_id.'</sup>';
+                $anoncode = SUP($this->anon_id);
                 if (!array_key_exists($comment->poster_ip, $this->anon_map)) {
                     $this->anon_map[$comment->poster_ip] = $this->anon_id;
                 }
-                #if($user->can(UserAbilities::VIEW_IP)) {
+                #if(Ctx::$user->can(UserAbilities::VIEW_IP)) {
                 #$style = " style='color: ".$this->get_anon_colour($comment->poster_ip).";'";
-                if ($user->can(Permissions::VIEW_IP) || $config->get_bool(CommentConfig::SHOW_REPEAT_ANONS, false)) {
-                    if ($this->anon_map[$comment->poster_ip] != $this->anon_id) {
-                        $anoncode2 = '<sup>('.$this->anon_map[$comment->poster_ip].')</sup>';
+                if (Ctx::$user->can(IPBanPermission::VIEW_IP) || Ctx::$config->get(CommentConfig::SHOW_REPEAT_ANONS)) {
+                    if ($this->anon_map[$comment->poster_ip] !== $this->anon_id) {
+                        $anoncode2 = SUP("(" . $this->anon_map[$comment->poster_ip] . ")");
                     }
                 }
             }
-            $h_userlink = "<span class='username'>" . $h_name . $anoncode . $anoncode2 . "</span>";
+            $userlink = SPAN(["class" => "username"], $comment->owner_name, $anoncode, $anoncode2);
             $this->anon_id++;
         } else {
-            $h_userlink = '<a class="username" href="'.make_link('user/'.$h_name).'">'.$h_name.'</a>';
+            $userlink = A(["class" => "username", "href" => make_link("user/{$comment->owner_name}")], $comment->owner_name);
         }
 
-        $hb = ($comment->owner_class == "hellbanned" ? "hb" : "");
+        $tfe = send_event(new TextFormattingEvent($comment->comment));
         if ($trim) {
-            $html = "
-			<div class=\"comment $hb\">
-				$h_userlink: $h_comment
-				<a href=\"".make_link("post/view/$i_image_id", null, "c$i_comment_id")."\">&gt;&gt;&gt;</a>
-			</div>
-			";
+            $html = DIV(
+                ["class" => "comment"],
+                $userlink,
+                ": ",
+                truncate($tfe->stripped, 50),
+                A(["href" => make_link("post/view/{$comment->image_id}", null, "c{$comment->comment_id}")], " >>>")
+            );
         } else {
-            $h_avatar = "";
-            if (!empty($comment->owner_email)) {
-                $hash = md5(strtolower($comment->owner_email));
-                $cb = date("Y-m-d");
-                $h_avatar = "<img alt='avatar' src=\"//www.gravatar.com/avatar/$hash.jpg?cacheBreak=$cb\"><br>";
-            }
-            $h_reply = " - <a href='javascript: replyTo($i_image_id, $i_comment_id, \"$h_name\")'>Reply</a>";
-            $h_ip = $user->can(Permissions::VIEW_IP) ? "<br>".show_ip($comment->poster_ip, "Comment posted {$comment->posted}") : "";
-            $h_del = "";
-            if ($user->can(Permissions::DELETE_COMMENT)) {
-                $h_del = " - " . $this->delete_link($i_comment_id, $i_image_id, $comment->owner_name, $tfe->stripped);
-            }
-            $html = "
-				<div class=\"comment $hb\" id=\"c$i_comment_id\">
-					<div class=\"info\">
-					$h_avatar
-					$h_timestamp$h_reply$h_ip$h_del
-					</div>
-					$h_userlink: $h_comment
-				</div>
-			";
+            /** @var BuildAvatarEvent $bae */
+            $bae = send_event(new BuildAvatarEvent($comment->get_owner()));
+            $html = DIV(
+                ["class" => "comment", "id" => "c{$comment->comment_id}"],
+                DIV(
+                    ["class" => "info"],
+                    emptyHTML(
+                        $bae->html ? emptyHTML($bae->html, BR()) : null
+                    ),
+                    emptyHTML(
+                        SHM_DATE($comment->posted),
+                        " - ",
+                        A(["href" => "javascript:replyTo({$comment->image_id}, {$comment->comment_id}, '{$comment->owner_name}')"], "Reply"),
+                    ),
+                    emptyHTML(
+                        Ctx::$user->can(IPBanPermission::VIEW_IP) ? emptyHTML(BR(), SHM_IP($comment->poster_ip, "Comment posted {$comment->posted}")) : null,
+                        Ctx::$user->can(CommentPermission::DELETE_COMMENT) ? emptyHTML(" - ", $this->delete_link($comment->comment_id, $comment->image_id, $comment->owner_name, $tfe->stripped)) : null,
+                    ),
+                ),
+                $userlink,
+                ": ",
+                $tfe->getFormattedHTML(),
+            );
         }
         return $html;
     }
 
-    protected function delete_link(int $comment_id, int $image_id, string $owner, string $text): string
+    protected function delete_link(int $comment_id, int $image_id, string $owner, string $text): HTMLElement
     {
-        $comment_preview = substr(html_unescape($text), 0, 50);
-        $j_delete_confirm_message = json_encode("Delete comment by {$owner}:\n$comment_preview") ?: "Delete <corrupt comment>";
-        $h_delete_script = html_escape("return confirm($j_delete_confirm_message);");
-        $h_delete_link = make_link("comment/delete/$comment_id/$image_id");
-        return "<a onclick='$h_delete_script' href='$h_delete_link'>Del</a>";
+        $comment_preview = truncate($text, 50);
+        $j_delete_confirm_message = json_encode("Delete comment by {$owner}:\n$comment_preview") ?: json_encode("Delete <corrupt comment>");
+        return A([
+            "onclick" => "return confirm($j_delete_confirm_message);",
+            "href" => make_link("comment/delete/$comment_id/$image_id"),
+        ], "Del");
     }
 
-    protected function build_postbox(int $image_id): string
+    protected function build_postbox(int $image_id): HTMLElement
     {
-        global $config;
-
-        $hash = CommentList::get_hash();
-        $h_captcha = $config->get_bool("comment_captcha") ? captcha_get_html() : "";
-
-        return '
-		<div class="comment comment_add">
-			'.make_form(make_link("comment/add")).'
-				<input type="hidden" name="image_id" value="'.$image_id.'" />
-				<input type="hidden" name="hash" value="'.$hash.'" />
-				<textarea id="comment_on_'.$image_id.'" name="comment" rows="5" cols="50"></textarea>
-				'.$h_captcha.'
-				<br><input type="submit" value="Post Comment" />
-			</form>
-		</div>
-		';
+        return DIV(
+            ["class" => "comment comment_add"],
+            SHM_SIMPLE_FORM(
+                make_link("comment/add"),
+                INPUT(["type" => "hidden", "name" => "image_id", "value" => $image_id]),
+                INPUT(["type" => "hidden", "name" => "hash", "value" => CommentList::get_hash()]),
+                TEXTAREA(["id" => "comment_on_$image_id", "name" => "comment", "rows" => 5, "cols" => 50]),
+                Captcha::get_html(CommentPermission::SKIP_CAPTCHA),
+                BR(),
+                INPUT(["type" => "submit", "value" => "Post Comment"])
+            ),
+        );
     }
 
-    public function get_help_html(): string
+    public function get_help_html(): HTMLElement
     {
-        return '<p>Search for posts containing a certain number of comments, or comments by a particular individual.</p>
-        <div class="command_example">
-        <code>comments=1</code>
-        <p>Returns posts with exactly 1 comment.</p>
-        </div>
-        <div class="command_example">
-        <code>comments>0</code>
-        <p>Returns posts with 1 or more comments. </p>
-        </div>
-        <p>Can use &lt;, &lt;=, &gt;, &gt;=, or =.</p>
-        <div class="command_example">
-        <code>commented_by:username</code>
-        <p>Returns posts that have been commented on by "username". </p>
-        </div>
-        <div class="command_example">
-        <code>commented_by_userno:123</code>
-        <p>Returns posts that have been commented on by user 123. </p>
-        </div>
-        ';
+        return emptyHTML(
+            P("Search for posts containing a certain number of comments, or comments by a particular individual."),
+            SHM_COMMAND_EXAMPLE("comments>0", "Returns posts with 1 or more comments"),
+            P("Can use <, <=, >, >=, or =."),
+            SHM_COMMAND_EXAMPLE("commented_by:username", "Returns posts that have been commented on by \"username\"."),
+            //SHM_COMMAND_EXAMPLE("commented_by_userno:123", "Returns posts that have been commented on by user 123."),
+        );
     }
 }

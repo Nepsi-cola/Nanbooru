@@ -4,9 +4,10 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class CBZFileHandler extends DataHandlerExtension
+final class CBZFileHandler extends DataHandlerExtension
 {
-    protected array $SUPPORTED_MIME = [MimeType::COMIC_ZIP];
+    public const KEY = "handle_cbz";
+    public const SUPPORTED_MIME = [MimeType::COMIC_ZIP];
 
     protected function media_check_properties(MediaCheckPropertiesEvent $event): void
     {
@@ -16,41 +17,41 @@ class CBZFileHandler extends DataHandlerExtension
         $event->image->image = false;
 
         $tmp = $this->get_representative_image($event->image->get_image_filename());
-        $info = getimagesize($tmp);
+        $info = getimagesize($tmp->str());
         if ($info) {
             $event->image->width = $info[0];
             $event->image->height = $info[1];
         }
-        unlink($tmp);
+        $tmp->unlink();
     }
 
     protected function create_thumb(Image $image): bool
     {
         $cover = $this->get_representative_image($image->get_image_filename());
-        create_scaled_image(
+        ThumbnailUtil::create_scaled_image(
             $cover,
             $image->get_thumb_filename(),
-            get_thumbnail_max_size_scaled(),
+            ThumbnailUtil::get_thumbnail_max_size_scaled(),
             MimeType::get_for_file($cover),
             null
         );
         return true;
     }
 
-    protected function check_contents(string $tmpname): bool
+    protected function check_contents(Path $tmpname): bool
     {
-        $fp = \Safe\fopen($tmpname, "r");
+        $fp = \Safe\fopen($tmpname->str(), "r");
         $head = fread($fp, 4);
         fclose($fp);
-        return $head == "PK\x03\x04";
+        return $head === "PK\x03\x04";
     }
 
-    private function get_representative_image(string $archive): string
+    private function get_representative_image(Path $archive): Path
     {
-        $out = "data/comic-cover-FIXME.jpg";  // TODO: random
+        $out = shm_tempnam("comic-cover");
 
         $za = new \ZipArchive();
-        $za->open($archive);
+        $za->open($archive->str());
         $names = [];
         for ($i = 0; $i < $za->numFiles;$i++) {
             $file = false_throws($za->statIndex($i));
@@ -64,7 +65,7 @@ class CBZFileHandler extends DataHandlerExtension
                 break;
             }
         }
-        file_put_contents($out, $za->getFromName($cover));
+        $out->put_contents(false_throws($za->getFromName($cover)));
         return $out;
     }
 }

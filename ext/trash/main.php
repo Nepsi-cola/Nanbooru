@@ -4,15 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\rawHTML;
-
-abstract class TrashConfig
+final class Trash extends Extension
 {
-    public const VERSION = "ext_trash_version";
-}
-
-class Trash extends Extension
-{
+    public const KEY = "trash";
     /** @var TrashTheme */
     protected Themelet $theme;
 
@@ -29,21 +23,16 @@ class Trash extends Extension
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $page, $user;
-
-        if ($event->page_matches("trash_restore/{image_id}", method: "POST", permission: Permissions::VIEW_TRASH)) {
+        if ($event->page_matches("trash_restore/{image_id}", method: "POST", permission: TrashPermission::VIEW_TRASH)) {
             $image_id = $event->get_iarg('image_id');
             self::set_trash($image_id, false);
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link("post/view/".$image_id));
+            Ctx::$page->set_redirect(make_link("post/view/".$image_id));
         }
     }
 
     private function check_permissions(Image $image): bool
     {
-        global $user;
-
-        if ($image['trash'] === true && !$user->can(Permissions::VIEW_TRASH)) {
+        if ($image['trash'] === true && !Ctx::$user->can(TrashPermission::VIEW_TRASH)) {
             return false;
         }
         return true;
@@ -61,11 +50,8 @@ class Trash extends Extension
 
     public function onDisplayingImage(DisplayingImageEvent $event): void
     {
-        global $page;
-
         if (!$this->check_permissions(($event->image))) {
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link());
+            Ctx::$page->set_redirect(make_link());
         }
     }
 
@@ -79,18 +65,16 @@ class Trash extends Extension
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        global $user;
-        if ($event->parent == "posts") {
-            if ($user->can(Permissions::VIEW_TRASH)) {
-                $event->add_nav_link("posts_trash", new Link('/post/list/in%3Atrash/1'), "Trash", null, 60);
+        if ($event->parent === "posts") {
+            if (Ctx::$user->can(TrashPermission::VIEW_TRASH)) {
+                $event->add_nav_link(search_link(['in:trash']), "Trash", order: 60);
             }
         }
     }
 
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::VIEW_TRASH)) {
+        if (Ctx::$user->can(TrashPermission::VIEW_TRASH)) {
             $event->add_link("Trash", search_link(["in:trash"]), 60);
         }
     }
@@ -98,14 +82,12 @@ class Trash extends Extension
     public const SEARCH_REGEXP = "/^in:(trash)$/i";
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
-        global $user;
-
         if (is_null($event->term) && $this->no_trash_query($event->context)) {
             $event->add_querylet(new Querylet("trash != :true", ["true" => true]));
         }
 
         if ($event->matches(self::SEARCH_REGEXP)) {
-            if ($user->can(Permissions::VIEW_TRASH)) {
+            if (Ctx::$user->can(TrashPermission::VIEW_TRASH)) {
                 $event->add_querylet(new Querylet("trash = :true", ["true" => true]));
             }
         }
@@ -113,9 +95,8 @@ class Trash extends Extension
 
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
-        global $user;
         if ($event->key === HelpPages::SEARCH) {
-            if ($user->can(Permissions::VIEW_TRASH)) {
+            if (Ctx::$user->can(TrashPermission::VIEW_TRASH)) {
                 $event->add_section("Trash", $this->theme->get_help_html());
             }
         }
@@ -145,34 +126,29 @@ class Trash extends Extension
     }
     public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($event->image['trash'] === true && $user->can(Permissions::VIEW_TRASH)) {
+        if ($event->image['trash'] === true && Ctx::$user->can(TrashPermission::VIEW_TRASH)) {
             $event->add_button("Restore From Trash", "trash_restore/".$event->image->id);
         }
     }
 
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
-        global $user;
-
-        if ($user->can(Permissions::VIEW_TRASH) && in_array("in:trash", $event->search_terms)) {
-            $event->add_action("bulk_trash_restore", "(U)ndelete", "u");
+        if (in_array("in:trash", $event->search_terms)) {
+            $event->add_action("trash-restore", "(U)ndelete", "u", permission: TrashPermission::VIEW_TRASH);
         }
     }
 
     public function onBulkAction(BulkActionEvent $event): void
     {
-        global $page, $user;
-
         switch ($event->action) {
-            case "bulk_trash_restore":
-                if ($user->can(Permissions::VIEW_TRASH)) {
+            case "trash-restore":
+                if (Ctx::$user->can(TrashPermission::VIEW_TRASH)) {
                     $total = 0;
                     foreach ($event->items as $image) {
                         self::set_trash($image->id, false);
                         $total++;
                     }
-                    $page->flash("Restored $total items from trash");
+                    $event->log_action("Restored $total items from trash");
                 }
                 break;
         }
@@ -182,14 +158,14 @@ class Trash extends Extension
     {
         global $database;
 
-        if ($this->get_version(TrashConfig::VERSION) < 1) {
+        if ($this->get_version() < 1) {
             $database->execute("ALTER TABLE images ADD COLUMN trash BOOLEAN NOT NULL DEFAULT FALSE");
             $database->execute("CREATE INDEX images_trash_idx ON images(trash)");
-            $this->set_version(TrashConfig::VERSION, 2);
+            $this->set_version(2);
         }
-        if ($this->get_version(TrashConfig::VERSION) < 2) {
+        if ($this->get_version() < 2) {
             $database->standardise_boolean("images", "trash");
-            $this->set_version(TrashConfig::VERSION, 2);
+            $this->set_version(2);
         }
     }
 }

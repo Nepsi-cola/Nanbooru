@@ -4,19 +4,18 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use function MicroHTML\{A, BR, COL, COLGROUP, SPAN, TABLE, TD, TH, THEAD, TR, emptyHTML};
+
 use MicroHTML\HTMLElement;
 
-use function MicroHTML\{A, BR, rawHTML, emptyHTML, TABLE, COLGROUP, COL, THEAD, TH, TR, TD, SPAN};
 use function MicroHTML\joinHTML;
 
 class TagListTheme extends Themelet
 {
     protected function get_tag_list_preamble(): HTMLElement
     {
-        global $config;
-
-        $tag_info_link_is_visible = !empty($config->get_string(TagListConfig::INFO_LINK));
-        $tag_count_is_visible = $config->get_bool(TagListConfig::SHOW_NUMBERS);
+        $tag_info_link_is_visible = !empty(Ctx::$config->get(TagListConfig::INFO_LINK));
+        $tag_count_is_visible = Ctx::$config->get(TagListConfig::SHOW_NUMBERS);
 
         return TABLE(
             ["class" => "tag_list"],
@@ -55,15 +54,13 @@ class TagListTheme extends Themelet
     /**
      * @param array<array{tag: string, count: int}> $tag_infos
      */
-    public function display_split_related_block(Page $page, array $tag_infos): void
+    public function display_split_related_block(array $tag_infos): void
     {
-        global $config;
-
-        if ($config->get_string(TagListConfig::RELATED_SORT) == TagListConfig::SORT_ALPHABETICAL) {
+        if (Ctx::$config->get(TagListConfig::RELATED_SORT) === TagListConfig::SORT_ALPHABETICAL) {
             usort($tag_infos, fn ($a, $b) => strcasecmp($a['tag'], $b['tag']));
         }
 
-        if (Extension::is_enabled(TagCategoriesInfo::KEY)) {
+        if (TagCategoriesInfo::is_enabled()) {
             $tag_category_dict = TagCategories::getKeyedDict();
         } else {
             $tag_category_dict = [];
@@ -87,7 +84,7 @@ class TagListTheme extends Themelet
 
         ksort($tag_categories_html);
         foreach (array_keys($tag_categories_html) as $category) {
-            if ($category == '') {
+            if ($category === '') {
                 $category_display_name = 'Tags';
                 $prio = 10;
             } elseif ($tag_categories_count[$category] < 2) {
@@ -97,64 +94,58 @@ class TagListTheme extends Themelet
                 $category_display_name = $tag_category_dict[$category]['display_multiple'];
                 $prio = 9;
             }
-            $page->add_block(new Block($category_display_name, $tag_categories_html[$category], "left", $prio));
+            Ctx::$page->add_block(new Block($category_display_name, $tag_categories_html[$category], "left", $prio));
         }
     }
 
     /**
      * @param array<array{tag: string, count: int}> $tag_infos
      */
-    public function display_related_block(Page $page, array $tag_infos, string $block_name): void
+    public function display_related_block(array $tag_infos, string $block_name): void
     {
-        global $config;
-
         $main_html = $this->get_tag_list_html(
             $tag_infos,
-            $config->get_string(TagListConfig::RELATED_SORT)
+            Ctx::$config->get(TagListConfig::RELATED_SORT)
         );
 
-        $page->add_block(new Block($block_name, $main_html, "left", 10));
+        Ctx::$page->add_block(new Block($block_name, $main_html, "left", 10));
     }
 
     /**
      * @param array<array{tag: string, count: int}> $tag_infos
      */
-    public function display_popular_block(Page $page, array $tag_infos): void
+    public function display_popular_block(array $tag_infos): void
     {
-        global $config;
-
         $main_html = emptyHTML(
             $this->get_tag_list_html(
                 $tag_infos,
-                $config->get_string(TagListConfig::POPULAR_SORT)
+                Ctx::$config->get(TagListConfig::POPULAR_SORT)
             ),
-            rawHTML("&nbsp;"),
+            " ",
             BR(),
             A(["class" => "more", "href" => make_link("tags")], "Full List")
         );
-        $page->add_block(new Block("Popular Tags", $main_html, "left", 60));
+        Ctx::$page->add_block(new Block("Popular Tags", $main_html, "left", 60));
     }
 
     /**
      * @param array<array{tag: string, count: int}> $tag_infos
      * @param string[] $search
      */
-    public function display_refine_block(Page $page, array $tag_infos, array $search): void
+    public function display_refine_block(array $tag_infos, array $search): void
     {
-        global $config;
-
         $main_html = emptyHTML(
             $this->get_tag_list_html(
                 $tag_infos,
-                $config->get_string(TagListConfig::POPULAR_SORT),
+                Ctx::$config->get(TagListConfig::POPULAR_SORT),
                 $search
             ),
-            rawHTML("&nbsp;"),
+            " ",
             BR(),
             A(["class" => "more", "href" => make_link("tags")], "Full List")
         );
 
-        $page->add_block(new Block("Refine Search", $main_html, "left", 60));
+        Ctx::$page->add_block(new Block("Refine Search", $main_html, "left", 60));
     }
 
     /**
@@ -163,24 +154,11 @@ class TagListTheme extends Themelet
      */
     protected function build_tag_row(array $row, array $search = []): HTMLElement
     {
-        global $config;
-
         $tag = $row['tag'];
-        $count = $row['count'];
-
-        if (Extension::is_enabled(TagCategoriesInfo::KEY)) {
-            $tag_category_dict = TagCategories::getKeyedDict();
-            $tag_category = TagCategories::get_tag_category($tag);
-            $tag_body = TagCategories::get_tag_body($tag);
-        } else {
-            $tag_category_dict = [];
-            $tag_category = null;
-            $tag_body = $tag;
-        }
 
         $tr = TR();
 
-        $info_link_template = $config->get_string(TagListConfig::INFO_LINK);
+        $info_link_template = Ctx::$config->get(TagListConfig::INFO_LINK);
         if (!empty($info_link_template)) {
             $tr->appendChild(TD(
                 ["class" => "tag_info_link_cell"],
@@ -203,10 +181,10 @@ class TagListTheme extends Themelet
             )
         ));
 
-        if ($config->get_bool(TagListConfig::SHOW_NUMBERS)) {
+        if (Ctx::$config->get(TagListConfig::SHOW_NUMBERS)) {
             $tr->appendChild(TD(
                 ["class" => "tag_count_cell"],
-                SPAN(["class" => "tag_count"], $count)
+                SPAN(["class" => "tag_count"], $row['count'])
             ));
         }
 
@@ -220,7 +198,7 @@ class TagListTheme extends Themelet
     {
         // FIXME: a better fix would be to make sure the inputs are correct
         $tag = strtolower($tag);
-        $tags = array_map("strtolower", $tags);
+        $tags = array_map(strtolower(...), $tags);
         return SPAN(
             ["class" => "ars"],
             joinHTML(

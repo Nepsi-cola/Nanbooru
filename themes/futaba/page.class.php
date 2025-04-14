@@ -4,9 +4,9 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{ARTICLE, BODY, DIV, FOOTER, H1, HEADER, HR, NAV};
 
-use function MicroHTML\{BODY, DIV, LI, A, rawHTML, emptyHTML, UL, ARTICLE, FOOTER, HR, HEADER, H1, NAV};
+use MicroHTML\HTMLElement;
 
 class FutabaPage extends Page
 {
@@ -33,7 +33,7 @@ class FutabaPage extends Page
             }
         }
 
-        if (empty($this->subheading)) {
+        if ($this->subheading === "") {
             $subheading = null;
         } else {
             $subheading = DIV(["id" => "subtitle"], $this->subheading);

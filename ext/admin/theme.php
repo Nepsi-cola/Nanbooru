@@ -11,9 +11,7 @@ class AdminPageTheme extends Themelet
      */
     public function display_page(): void
     {
-        global $page;
-
-        $page->set_title("Admin Tools");
-        $page->add_block(new NavBlock());
+        Ctx::$page->set_title("Admin Tools");
+        $this->display_navigation();
     }
 }

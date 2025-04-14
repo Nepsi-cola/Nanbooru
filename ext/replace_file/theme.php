@@ -4,31 +4,26 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\{TABLE,TR,TD};
-use function MicroHTML\SMALL;
-use function MicroHTML\INPUT;
-use function MicroHTML\emptyHTML;
-use function MicroHTML\BR;
-use function MicroHTML\P;
+use function MicroHTML\{BR, INPUT, P, SMALL, emptyHTML};
+use function MicroHTML\{TABLE, TD, TR};
 
 class ReplaceFileTheme extends Themelet
 {
     /**
      * Only allows 1 file to be uploaded - for replacing another image file.
      */
-    public function display_replace_page(Page $page, int $image_id): void
+    public function display_replace_page(int $image_id): void
     {
-        global $config, $page;
-        $tl_enabled = ($config->get_string(UploadConfig::TRANSLOAD_ENGINE, "none") != "none");
+        $tl_enabled = (Ctx::$config->get(UploadConfig::TRANSLOAD_ENGINE) !== "none");
         $accept = $this->get_accept();
 
-        $max_size = $config->get_int(UploadConfig::SIZE);
+        $max_size = Ctx::$config->get(UploadConfig::SIZE);
         $max_kb = to_shorthand_int($max_size);
 
         $image = Image::by_id_ex($image_id);
         $thumbnail = $this->build_thumb($image);
 
-        $form = SHM_FORM("replace/".$image_id, multipart: true);
+        $form = SHM_FORM(make_link("replace/".$image_id), multipart: true);
         $form->appendChild(emptyHTML(
             TABLE(
                 ["id" => "large_upload_form", "class" => "form"],
@@ -57,9 +52,9 @@ class ReplaceFileTheme extends Themelet
             $max_size > 0 ? SMALL("(Max file size is $max_kb)") : null,
         );
 
-        $page->set_title("Replace File");
-        $page->add_block(new NavBlock());
-        $page->add_block(new Block("Upload Replacement File", $html, "main", 20));
+        Ctx::$page->set_title("Replace File");
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block("Upload Replacement File", $html, "main", 20));
     }
 
     protected function get_accept(): string

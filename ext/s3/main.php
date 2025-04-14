@@ -4,67 +4,59 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\{InputInterface,InputArgument,InputOption};
-use Symfony\Component\Console\Output\OutputInterface;
-
 use function MicroHTML\INPUT;
 
-class S3 extends Extension
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\{InputArgument, InputInterface, InputOption};
+use Symfony\Component\Console\Output\OutputInterface;
+
+require_once __DIR__ . "/S3.php";
+
+final class S3 extends Extension
 {
+    public const KEY = "s3";
     public int $synced = 0;
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        global $config;
-
-        $sb = $event->panel->create_new_block("S3 CDN");
-        $sb->add_text_option(S3Config::ACCESS_KEY_ID, "Access Key ID: ");
-        $sb->add_text_option(S3Config::ACCESS_KEY_SECRET, "<br>Access Key Secret: ");
-        $sb->add_text_option(S3Config::ENDPOINT, "<br>Endpoint: ");
-        $sb->add_text_option(S3Config::IMAGE_BUCKET, "<br>Image Bucket: ");
-    }
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;
 
-        if ($this->get_version("ext_s3_version") < 1) {
+        if ($this->get_version() < 1) {
             $database->create_table("s3_sync_queue", "
                 hash CHAR(32) NOT NULL PRIMARY KEY,
                 time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 action CHAR(1) NOT NULL DEFAULT 'S'
             ");
-            $this->set_version("ext_s3_version", 1);
+            $this->set_version(1);
         }
     }
 
     public function onAdminBuilding(AdminBuildingEvent $event): void
     {
-        global $database, $page;
+        global $database;
         $count = $database->get_one("SELECT COUNT(*) FROM s3_sync_queue");
         $html = SHM_SIMPLE_FORM(
-            "admin/s3_process",
+            make_link("admin/s3_process"),
             INPUT(["type" => 'number', "name" => 'count', 'value' => '10']),
             SHM_SUBMIT("Sync N/$count posts"),
         );
-        $page->add_block(new Block("Process S3 Queue", $html));
+        Ctx::$page->add_block(new Block("Process S3 Queue", $html));
     }
 
     public function onAdminAction(AdminActionEvent $event): void
     {
         global $database;
-        if ($event->action == "s3_process") {
+        if ($event->action === "s3_process") {
             foreach ($database->get_all(
                 "SELECT * FROM s3_sync_queue ORDER BY time ASC LIMIT :count",
                 ["count" => isset($event->params['count']) ? int_escape($event->params["count"]) : 10]
             ) as $row) {
-                if ($row['action'] == "S") {
+                if ($row['action'] === "S") {
                     $image = Image::by_hash($row['hash']);
                     if ($image) {
                         $this->sync_post($image);
                     }
-                } elseif ($row['action'] == "D") {
+                } elseif ($row['action'] === "D") {
                     $this->remove_file($row['hash']);
                 }
             }
@@ -85,13 +77,13 @@ class S3 extends Extension
                     "SELECT * FROM s3_sync_queue ORDER BY time ASC LIMIT :count",
                     ["count" => $input->getOption('count') ?? $count]
                 ) as $row) {
-                    if ($row['action'] == "S") {
+                    if ($row['action'] === "S") {
                         $image = Image::by_hash($row['hash']);
                         if ($image) {
                             $output->writeln("SYN {$row['hash']} ($image->id)");
                             $this->sync_post($image);
                         }
-                    } elseif ($row['action'] == "D") {
+                    } elseif ($row['action'] === "D") {
                         $output->writeln("DEL {$row['hash']}");
                         $this->remove_file($row['hash']);
                     } else {
@@ -106,11 +98,7 @@ class S3 extends Extension
             ->setCode(function (InputInterface $input, OutputInterface $output): int {
                 $query = Tag::explode($input->getArgument('query'));
                 foreach (Search::find_images_iterable(tags: $query) as $image) {
-                    if ($this->sync_post($image)) {
-                        print("{$image->id}: {$image->hash}\n");
-                    } else {
-                        print("{$image->id}: {$image->hash} (skipped)\n");
-                    }
+                    print("{$image->id}: {$image->hash}\n");
                 }
                 return Command::SUCCESS;
             });
@@ -127,20 +115,17 @@ class S3 extends Extension
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $config, $page, $user;
-        if ($event->page_matches("s3/sync/{image_id}", method: "POST", permission: Permissions::DELETE_IMAGE)) {
+        if ($event->page_matches("s3/sync/{image_id}", method: "POST", permission: ImagePermission::DELETE_IMAGE)) {
             $id = $event->get_iarg('image_id');
             $this->sync_post(Image::by_id_ex($id));
-            log_info("s3", "Manual resync for >>$id", "File re-sync'ed");
-            $page->set_mode(PageMode::REDIRECT);
-            $page->set_redirect(make_link("post/view/$id"));
+            Log::info("s3", "Manual resync for >>$id", "File re-sync'ed");
+            Ctx::$page->set_redirect(make_link("post/view/$id"));
         }
     }
 
     public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
     {
-        global $user;
-        if ($user->can(Permissions::DELETE_IMAGE)) {
+        if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
             $event->add_button("CDN Re-Sync", "s3/sync/{$event->image->id}");
         }
     }
@@ -168,22 +153,20 @@ class S3 extends Extension
     }
 
     // utils
-    private function get_client(): ?\Aws\S3\S3Client
+    private function get_client(): \S3Client\S3
     {
-        global $config;
-        $access_key_id = $config->get_string(S3Config::ACCESS_KEY_ID);
-        $access_key_secret = $config->get_string(S3Config::ACCESS_KEY_SECRET);
+        $access_key_id = Ctx::$config->get(S3Config::ACCESS_KEY_ID);
+        $access_key_secret = Ctx::$config->get(S3Config::ACCESS_KEY_SECRET);
         if (is_null($access_key_id) || is_null($access_key_secret)) {
-            return null;
+            throw new ServerError("S3 credentials not set");
         }
-        $endpoint = $config->get_string(S3Config::ENDPOINT);
-        $credentials = new \Aws\Credentials\Credentials($access_key_id, $access_key_secret);
-        return new \Aws\S3\S3Client([
-            'region' => 'auto',
-            'endpoint' => $endpoint,
-            'version' => 'latest',
-            'credentials' => $credentials,
-        ]);
+        $endpoint = Ctx::$config->get(S3Config::ENDPOINT);
+
+        return new \S3Client\S3(
+            $access_key_id,
+            $access_key_secret,
+            $endpoint,
+        );
     }
 
     private function hash_to_path(string $hash): string
@@ -195,33 +178,22 @@ class S3 extends Extension
 
     private function is_busy(): bool
     {
-        global $config;
         $this->synced++;
-        if (PHP_SAPI == "cli") {
+        if (PHP_SAPI === "cli") {
             return false; // CLI can go on for as long as it wants
         }
-        return $this->synced > $config->get_int(UploadConfig::COUNT);
+        return $this->synced > Ctx::$config->get(UploadConfig::COUNT);
     }
 
     // underlying s3 interaction functions
     /**
-     * @param string[]|null $new_tags
+     * @param list<tag-string>|null $new_tags
      */
-    private function sync_post(Image $image, ?array $new_tags = null, bool $overwrite = true): bool
+    private function sync_post(Image $image, ?array $new_tags = null): void
     {
-        global $config;
-
-        $client = $this->get_client();
-        if (is_null($client)) {
-            return false;
+        if (defined("UNITTEST")) {
+            return;
         }
-        $image_bucket = $config->get_string(S3Config::IMAGE_BUCKET);
-
-        $key = $this->hash_to_path($image->hash);
-        if (!$overwrite && $client->doesObjectExist($image_bucket, $key)) {
-            return false;
-        }
-
         if ($this->is_busy()) {
             $this->enqueue($image->hash, "S");
         } else {
@@ -233,33 +205,39 @@ class S3 extends Extension
                 $friendly = $image->parse_link_template('$id - $tags.$ext');
                 $image->tag_array = $_orig_tags;
             }
-            $client->putObject([
-                'Bucket' => $image_bucket,
-                'Key' => $key,
-                'Body' => \Safe\file_get_contents($image->get_image_filename()),
-                'ACL' => 'public-read',
-                'ContentType' => $image->get_mime(),
-                'ContentDisposition' => "inline; filename=\"$friendly\"",
-            ]);
+            $client = $this->get_client();
+            $bucket = Ctx::$config->get(S3Config::IMAGE_BUCKET);
+            if ($bucket === null) {
+                throw new ServerError("S3 bucket not set");
+            }
+            $client->putObject(
+                $bucket,
+                $this->hash_to_path($image->hash),
+                $image->get_image_filename()->get_contents(),
+                [
+                    'ACL' => 'public-read',
+                    'ContentType' => (string)$image->get_mime(),
+                    'ContentDisposition' => "inline; filename=\"$friendly\"",
+                ]
+            );
             $this->dequeue($image->hash);
         }
-        return true;
     }
 
     private function remove_file(string $hash): void
     {
-        global $config;
-        $client = $this->get_client();
-        if (is_null($client)) {
+        if (defined("UNITTEST")) {
             return;
         }
         if ($this->is_busy()) {
             $this->enqueue($hash, "D");
         } else {
-            $client->deleteObject([
-                'Bucket' => $config->get_string(S3Config::IMAGE_BUCKET),
-                'Key' => $this->hash_to_path($hash),
-            ]);
+            $client = $this->get_client();
+            $bucket = Ctx::$config->get(S3Config::IMAGE_BUCKET);
+            if ($bucket === null) {
+                throw new ServerError("S3 bucket not set");
+            }
+            $client->deleteObject($bucket, $this->hash_to_path($hash));
             $this->dequeue($hash);
         }
     }

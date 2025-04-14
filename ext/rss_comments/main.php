@@ -6,28 +6,24 @@ namespace Shimmie2;
 
 use function MicroHTML\LINK;
 
-class RSSComments extends Extension
+final class RSSComments extends Extension
 {
+    public const KEY = "rss_comments";
+
     public function onPostListBuilding(PostListBuildingEvent $event): void
     {
-        global $config, $page;
-        $title = $config->get_string(SetupConfig::TITLE);
-
-        $page->add_html_header(LINK([
+        Ctx::$page->add_html_header(LINK([
             'rel' => 'alternate',
             'type' => 'application/rss+xml',
-            'title' => "$title - Comments",
-            'href' => make_link("rss/comments")
+            'title' => Ctx::$config->get(SetupConfig::TITLE) . " - Comments",
+            'href' => (string)make_link("rss/comments")
         ]));
     }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $config, $database, $page;
+        global $database;
         if ($event->page_matches("rss/comments")) {
-            $page->set_mode(PageMode::DATA);
-            $page->set_mime(MimeType::RSS);
-
             $comments = $database->get_all("
 				SELECT
 					users.id as user_id, users.name as user_name,
@@ -44,7 +40,7 @@ class RSSComments extends Extension
             foreach ($comments as $comment) {
                 $image_id = $comment['image_id'];
                 $comment_id = $comment['comment_id'];
-                $link = make_http(make_link("post/view/$image_id"));
+                $link = make_link("post/view/$image_id")->asAbsolute();
                 $owner = html_escape($comment['user_name']);
                 $posted = date(DATE_RSS, \Safe\strtotime($comment['posted']));
                 $comment = html_escape($comment['comment']);
@@ -61,9 +57,9 @@ class RSSComments extends Extension
 				";
             }
 
-            $title = $config->get_string(SetupConfig::TITLE);
-            $base_href = make_http(get_base_href());
-            $version = VERSION;
+            $title = Ctx::$config->get(SetupConfig::TITLE);
+            $base_href = Url::base()->asAbsolute();
+            $version = SysConfig::getVersion();
             $xml = <<<EOD
 <?xml version="1.0" encoding="utf-8" ?>
 <rss version="2.0">
@@ -77,14 +73,14 @@ class RSSComments extends Extension
 	</channel>
 </rss>
 EOD;
-            $page->set_data($xml);
+            Ctx::$page->set_data(MimeType::RSS, $xml);
         }
     }
 
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
-        if ($event->parent == "comment") {
-            $event->add_nav_link("comment_rss", new Link('rss/comments'), "Feed");
+        if ($event->parent === "comment") {
+            $event->add_nav_link(make_link('rss/comments'), "Feed");
         }
     }
 }

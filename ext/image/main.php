@@ -4,99 +4,53 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use Symfony\Component\Console\Command\Command;
-use Symfony\Component\Console\Input\{InputInterface,InputArgument};
-use Symfony\Component\Console\Output\OutputInterface;
+use function MicroHTML\{A, INPUT, STYLE, emptyHTML};
 
-use function MicroHTML\{INPUT, emptyHTML, STYLE};
+use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Input\{InputArgument, InputInterface};
+use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * A class to handle adding / getting / removing image files from the disk.
  */
-class ImageIO extends Extension
+final class ImageIO extends Extension
 {
-    public const COLLISION_OPTIONS = [
-        'Error' => ImageConfig::COLLISION_ERROR,
-        'Merge' => ImageConfig::COLLISION_MERGE
-    ];
-
-    public const ON_DELETE_OPTIONS = [
-        'Return to post list' => ImageConfig::ON_DELETE_LIST,
-        'Go to next post' => ImageConfig::ON_DELETE_NEXT
-    ];
-
-    public const EXIF_READ_FUNCTION = "exif_read_data";
-
-    public const THUMBNAIL_ENGINES = [
-        'Built-in GD' => MediaEngine::GD,
-        'ImageMagick' => MediaEngine::IMAGICK
-    ];
-
-    public const THUMBNAIL_TYPES = [
-        'JPEG' => MimeType::JPEG,
-        'WEBP (Not IE compatible)' => MimeType::WEBP
-    ];
-
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_string(ImageConfig::THUMB_ENGINE, MediaEngine::GD);
-        $config->set_default_int(ImageConfig::THUMB_WIDTH, 192);
-        $config->set_default_int(ImageConfig::THUMB_HEIGHT, 192);
-        $config->set_default_int(ImageConfig::THUMB_SCALING, 100);
-        $config->set_default_int(ImageConfig::THUMB_QUALITY, 75);
-        $config->set_default_string(ImageConfig::THUMB_MIME, MimeType::JPEG);
-        $config->set_default_string(ImageConfig::THUMB_FIT, Media::RESIZE_TYPE_FIT);
-        $config->set_default_string(ImageConfig::THUMB_ALPHA_COLOR, Media::DEFAULT_ALPHA_CONVERSION_COLOR);
-
-        if (function_exists(self::EXIF_READ_FUNCTION)) {
-            $config->set_default_bool(ImageConfig::SHOW_META, false);
-        }
-        $config->set_default_string(ImageConfig::ILINK, '');
-        $config->set_default_string(ImageConfig::TLINK, '');
-        $config->set_default_string(ImageConfig::TIP, '$tags // $size // $filesize');
-        $config->set_default_string(ImageConfig::UPLOAD_COLLISION_HANDLER, ImageConfig::COLLISION_ERROR);
-        $config->set_default_int(ImageConfig::EXPIRES, (60 * 60 * 24 * 31));	// defaults to one month
-    }
+    public const KEY = "image";
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
-        global $config;
-
-        if ($this->get_version(ImageConfig::VERSION) < 1) {
-            switch ($config->get_string("thumb_type")) {
+        if ($this->get_version() < 1) {
+            switch (Ctx::$config->get("thumb_type")) {
                 case FileExtension::WEBP:
-                    $config->set_string(ImageConfig::THUMB_MIME, MimeType::WEBP);
+                    Ctx::$config->set(ThumbnailConfig::MIME, MimeType::WEBP);
                     break;
                 case FileExtension::JPEG:
-                    $config->set_string(ImageConfig::THUMB_MIME, MimeType::JPEG);
+                    Ctx::$config->set(ThumbnailConfig::MIME, MimeType::JPEG);
                     break;
             }
-            $config->delete("thumb_type");
-
-            $this->set_version(ImageConfig::VERSION, 1);
+            Ctx::$config->delete("thumb_type");
+            $this->set_version(1);
         }
     }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $config, $page, $user;
+        $thumb_width = Ctx::$config->get(ThumbnailConfig::WIDTH);
+        $thumb_height = Ctx::$config->get(ThumbnailConfig::HEIGHT);
+        Ctx::$page->add_html_header(STYLE(":root {--thumb-width: {$thumb_width}px; --thumb-height: {$thumb_height}px;}"));
 
-        $thumb_width = $config->get_int(ImageConfig::THUMB_WIDTH, 192);
-        $thumb_height = $config->get_int(ImageConfig::THUMB_HEIGHT, 192);
-        $page->add_html_header(STYLE(":root {--thumb-width: {$thumb_width}px; --thumb-height: {$thumb_height}px;}"));
-
-        if ($event->page_matches("image/delete", method: "POST", permission: Permissions::DELETE_IMAGE)) {
-            $image = Image::by_id(int_escape($event->req_POST('image_id')));
-            if ($image) {
+        if ($event->page_matches("image/delete", method: "POST")) {
+            $image = Image::by_id_ex(int_escape($event->POST->req('image_id')));
+            if ($this->can_user_delete_image(Ctx::$user, $image)) {
                 send_event(new ImageDeletionEvent($image));
 
-                if ($config->get_string(ImageConfig::ON_DELETE) === ImageConfig::ON_DELETE_NEXT) {
-                    redirect_to_next_image($image, $event->get_GET('search'));
+                if (Ctx::$config->get(ImageConfig::ON_DELETE) === 'next') {
+                    $this->redirect_to_next_image($image, $event->GET->get('search'));
                 } else {
-                    $page->set_mode(PageMode::REDIRECT);
-                    $page->set_redirect(referer_or(make_link(), ['post/view']));
+                    Ctx::$page->set_redirect(Url::referer_or(ignore: ['post/view']));
                 }
+            } else {
+                throw new PermissionDenied("You do not have permission to delete this image.");
             }
         } elseif ($event->page_matches("image/{image_id}/{filename}")) {
             $num = $event->get_iarg('image_id');
@@ -109,15 +63,15 @@ class ImageIO extends Extension
 
     public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
     {
-        global $user;
-
-        if ($user->can(Permissions::DELETE_IMAGE)) {
-            $form = SHM_FORM("image/delete", form_id: "image_delete_form");
-            $form->appendChild(emptyHTML(
-                INPUT(["type" => 'hidden', "name" => 'image_id', "value" => $event->image->id]),
-                INPUT(["type" => 'submit', "value" => 'Delete', "onclick" => 'return confirm("Delete the image?");', "id" => "image_delete_button"]),
+        if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
+            $event->add_part(SHM_FORM(
+                action: make_link("image/delete"),
+                id: "image_delete_form",
+                children: [
+                    INPUT(["type" => 'hidden', "name" => 'image_id', "value" => $event->image->id]),
+                    INPUT(["type" => 'submit', "value" => 'Delete', "onclick" => 'return confirm("Delete the image?");', "id" => "image_delete_button"]),
+                ]
             ));
-            $event->add_part($form);
         }
     }
 
@@ -137,7 +91,7 @@ class ImageIO extends Extension
     public function onImageAddition(ImageAdditionEvent $event): void
     {
         send_event(new ThumbnailGenerationEvent($event->image));
-        log_info("image", "Uploaded >>{$event->image->id} ({$event->image->hash})");
+        Log::info("image", "Uploaded >>{$event->image->id} ({$event->image->hash})");
     }
 
     public function onImageDeletion(ImageDeletionEvent $event): void
@@ -147,55 +101,14 @@ class ImageIO extends Extension
 
     public function onUserPageBuilding(UserPageBuildingEvent $event): void
     {
-        $u_name = url_escape($event->display_user->name);
         $i_image_count = Search::count_images(["user={$event->display_user->name}"]);
         $i_days_old = ((time() - \Safe\strtotime($event->display_user->join_date)) / 86400) + 1;
         $h_image_rate = sprintf("%.1f", ($i_image_count / $i_days_old));
-        $images_link = search_link(["user=$u_name"]);
-        $event->add_part("<a href='$images_link'>Posts uploaded</a>: $i_image_count, $h_image_rate per day");
-    }
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        global $config;
-
-        $sb = $event->panel->create_new_block("Post Options");
-        $sb->start_table();
-        $sb->position = 30;
-        // advanced only
-        //$sb->add_text_option(ImageConfig::ILINK, "Image link: ");
-        //$sb->add_text_option(ImageConfig::TLINK, "<br>Thumbnail link: ");
-        $sb->add_text_option(ImageConfig::TIP, "Post tooltip", true);
-        $sb->add_text_option(ImageConfig::INFO, "Post info", true);
-        $sb->add_choice_option(ImageConfig::UPLOAD_COLLISION_HANDLER, self::COLLISION_OPTIONS, "Upload collision handler", true);
-        $sb->add_choice_option(ImageConfig::ON_DELETE, self::ON_DELETE_OPTIONS, "On Delete", true);
-        if (function_exists(self::EXIF_READ_FUNCTION)) {
-            $sb->add_bool_option(ImageConfig::SHOW_META, "Show metadata", true);
-        }
-        $sb->end_table();
-
-        $sb = $event->panel->create_new_block("Thumbnailing");
-        $sb->start_table();
-        $sb->add_choice_option(ImageConfig::THUMB_ENGINE, self::THUMBNAIL_ENGINES, "Engine", true);
-        $sb->add_choice_option(ImageConfig::THUMB_MIME, self::THUMBNAIL_TYPES, "Filetype", true);
-
-        $sb->add_int_option(ImageConfig::THUMB_WIDTH, "Max Width", true);
-        $sb->add_int_option(ImageConfig::THUMB_HEIGHT, "Max Height", true);
-
-        $options = [];
-        foreach (MediaEngine::RESIZE_TYPE_SUPPORT[$config->get_string(ImageConfig::THUMB_ENGINE)] as $type) {
-            $options[$type] = $type;
-        }
-
-        $sb->add_choice_option(ImageConfig::THUMB_FIT, $options, "Fit", true);
-
-        $sb->add_int_option(ImageConfig::THUMB_QUALITY, "Quality", true);
-        $sb->add_int_option(ImageConfig::THUMB_SCALING, "High-DPI Scale %", true);
-        if ($config->get_string(ImageConfig::THUMB_MIME) === MimeType::JPEG) {
-            $sb->add_color_option(ImageConfig::THUMB_ALPHA_COLOR, "Alpha Conversion Color", true);
-        }
-
-        $sb->end_table();
+        $images_link = search_link(["user={$event->display_user->name}"]);
+        $event->add_part(emptyHTML(
+            A(["href" => $images_link], "Posts uploaded"),
+            ": $i_image_count, $h_image_rate per day"
+        ));
     }
 
     public function onParseLinkTemplate(ParseLinkTemplateEvent $event): void
@@ -211,57 +124,76 @@ class ImageIO extends Extension
         $event->replace('$filename', $base_fname);
         $event->replace('$ext', $event->image->get_ext());
         if (isset($event->image->posted)) {
-            $event->replace('$date', autodate($event->image->posted, false));
+            $event->replace('$date', date('c', \Safe\strtotime($event->image->posted)));
         }
         $event->replace("\\n", "\n");
     }
 
-    /**
-     * @param array<string, string|string[]> $params
-     */
-    private function send_file(int $image_id, string $type, array $params): void
+    private function redirect_to_next_image(Image $image, ?string $search = null): void
     {
-        global $config, $page;
+        if (!is_null($search)) {
+            $search_terms = Tag::explode($search);
+            $fragment = "search=" . url_escape($search);
+        } else {
+            $search_terms = [];
+            $fragment = null;
+        }
 
+        $target_image = $image->get_next($search_terms);
+
+        if ($target_image === null) {
+            $redirect_target = Url::referer_or(search_link(), ['post/view']);
+        } else {
+            $redirect_target = make_link("post/view/{$target_image->id}", fragment: $fragment);
+        }
+
+        Ctx::$page->set_redirect($redirect_target);
+    }
+
+    private function can_user_delete_image(User $user, Image $image): bool
+    {
+        if ($user->can(ImagePermission::DELETE_OWN_IMAGE) && $image->owner_id === $user->id) {
+            return true;
+        }
+        return $user->can(ImagePermission::DELETE_IMAGE);
+    }
+
+    private function send_file(int $image_id, string $type, QueryArray $params): void
+    {
+        $page = Ctx::$page;
         $image = Image::by_id_ex($image_id);
 
-        if ($type == "thumb") {
-            $mime = $config->get_string(ImageConfig::THUMB_MIME);
+        if ($type === "thumb") {
+            $mime = new MimeType(Ctx::$config->get(ThumbnailConfig::MIME));
             $file = $image->get_thumb_filename();
         } else {
             $mime = $image->get_mime();
             $file = $image->get_image_filename();
         }
-        if (!file_exists($file)) {
-            http_response_code(404);
-            die();
+        if (!$file->exists()) {
+            throw new PostNotFound("Image not found");
         }
 
-        $page->set_mime($mime);
-
-
         if (isset($_SERVER["HTTP_IF_MODIFIED_SINCE"])) {
-            $if_modified_since = preg_replace_ex('/;.*$/', '', $_SERVER["HTTP_IF_MODIFIED_SINCE"]);
+            $if_modified_since = \Safe\preg_replace('/;.*$/', '', $_SERVER["HTTP_IF_MODIFIED_SINCE"]);
         } else {
             $if_modified_since = "";
         }
-        $gmdate_mod = gmdate('D, d M Y H:i:s', \Safe\filemtime($file)) . ' GMT';
+        $gmdate_mod = gmdate('D, d M Y H:i:s', $file->filemtime()) . ' GMT';
 
-        if ($if_modified_since == $gmdate_mod) {
-            $page->set_mode(PageMode::DATA);
+        if ($if_modified_since === $gmdate_mod) {
             $page->set_code(304);
-            $page->set_data("");
+            $page->set_data(MimeType::TEXT, "");
         } else {
-            $page->set_mode(PageMode::FILE);
             $page->add_http_header("Last-Modified: $gmdate_mod");
-            if ($type != "thumb") {
+            if ($type !== "thumb") {
                 $page->set_filename($image->get_nice_image_name(), 'inline');
             }
 
-            $page->set_file($file);
+            $page->set_file($mime, $file);
 
-            if ($config->get_int(ImageConfig::EXPIRES)) {
-                $expires = date(DATE_RFC1123, time() + $config->get_int(ImageConfig::EXPIRES));
+            if (Ctx::$config->get(ImageConfig::EXPIRES)) {
+                $expires = date(DATE_RFC1123, time() + Ctx::$config->get(ImageConfig::EXPIRES));
             } else {
                 $expires = 'Fri, 2 Sep 2101 12:42:42 GMT'; // War was beginning
             }

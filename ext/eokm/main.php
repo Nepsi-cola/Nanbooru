@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class Eokm extends Extension
+final class Eokm extends Extension
 {
+    public const KEY = "eokm";
+
     public function get_priority(): int
     {
         return 40;
@@ -13,9 +15,8 @@ class Eokm extends Extension
 
     public function onImageAddition(ImageAdditionEvent $event): void
     {
-        global $config;
-        $username = $config->get_string("eokm_username");
-        $password = $config->get_string("eokm_password");
+        $username = Ctx::$config->get(EokmConfig::USERNAME);
+        $password = Ctx::$config->get(EokmConfig::PASSWORD);
 
         if ($username && $password) {
             $ch = \Safe\curl_init("https://api.eokmhashdb.nl/v1/check/md5");
@@ -30,24 +31,14 @@ class Eokm extends Extension
             curl_close($ch);
 
             /** @noinspection PhpStatementHasEmptyBodyInspection */
-            if ($return == "false") {
+            if ($return === "false") {
                 // all ok
-            } elseif ($return == "true") {
-                log_warning("eokm", "User tried to upload banned image {$event->image->hash}");
+            } elseif ($return === "true") {
+                Log::warning("eokm", "User tried to upload banned image {$event->image->hash}");
                 throw new UploadException("Post banned");
             } else {
-                log_warning("eokm", "Unexpected return from EOKM: $return");
+                Log::warning("eokm", "Unexpected return from EOKM: $return");
             }
         }
-    }
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sb = $event->panel->create_new_block("EOKM Filter");
-
-        $sb->start_table();
-        $sb->add_text_option("eokm_username", "Username", true);
-        $sb->add_text_option("eokm_password", "Password", true);
-        $sb->end_table();
     }
 }

@@ -4,35 +4,32 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, DIV, INPUT, TD, TH, TR, emptyHTML};
 
-use function MicroHTML\{TR, TH, TD, emptyHTML, rawHTML, joinHTML, DIV, INPUT, A, TEXTAREA};
+use MicroHTML\HTMLElement;
 
 class PostSourceTheme extends Themelet
 {
-    public function mss_html(string $terms): string
+    public function mss_html(string $terms): HTMLElement
     {
-        $h_terms = html_escape($terms);
-        $html = make_form(make_link("tag_edit/mass_source_set")) . "
-				<input type='hidden' name='tags' value='$h_terms'>
-				<input type='text' name='source' value=''>
-				<input type='submit' value='Set Source For All' onclick='return confirm(\"This will mass-edit all sources on the page.\\nAre you sure you want to do this?\")'>
-			</form>
-		";
-        return $html;
+        return SHM_SIMPLE_FORM(
+            make_link("tag_edit/mass_source_set"),
+            INPUT(["type" => "hidden", "name" => "tags", "value" => $terms]),
+            INPUT(["type" => "text", "name" => "source", "value" => '']),
+            INPUT(["type" => "submit", "value" => "Set Source For All", "onclick" => "return confirm(\"This will mass-edit all sources on the page.\\nAre you sure you want to do this?\")"])
+        );
     }
 
     public function get_source_editor_html(Image $image): HTMLElement
     {
-        global $user;
         return SHM_POST_INFO(
             "Source Link",
             DIV(
                 ["style" => "overflow: hidden; white-space: nowrap; max-width: 350px; text-overflow: ellipsis;"],
                 $this->format_source($image->get_source())
             ),
-            $user->can(Permissions::EDIT_IMAGE_SOURCE) ? INPUT(["type" => "text", "name" => "source", "value" => $image->get_source()]) : null,
-            link: Extension::is_enabled(SourceHistoryInfo::KEY) ? make_link("source_history/{$image->id}") : null,
+            Ctx::$user->can(PostSourcePermission::EDIT_IMAGE_SOURCE) ? INPUT(["type" => "text", "name" => "source", "value" => $image->get_source()]) : null,
+            link: SourceHistoryInfo::is_enabled() ? make_link("source_history/{$image->id}") : null,
         );
     }
 
@@ -49,7 +46,7 @@ class PostSourceTheme extends Themelet
             }
             return A(["href" => $source], $h_source);
         }
-        return rawHTML("Unknown");
+        return emptyHTML("Unknown");
     }
 
     public function get_upload_common_html(): HTMLElement
@@ -66,7 +63,7 @@ class PostSourceTheme extends Themelet
             INPUT([
                 "type" => "text",
                 "name" => "source{$suffix}",
-                "value" => ($suffix == 0) ? @$_GET['source'] : null,
+                "value" => ($suffix === "0") ? @$_GET['source'] : null,
             ])
         );
     }

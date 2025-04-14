@@ -4,133 +4,105 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use function MicroHTML\rawHTML;
+use function MicroHTML\{A, BR, DIV, H3, INPUT, P, emptyHTML, joinHTML};
+
+use MicroHTML\HTMLElement;
 
 class NumericScoreTheme extends Themelet
 {
     public function get_voter(Image $image): void
     {
-        global $user, $page;
-        $i_image_id = $image->id;
-        $i_score = (int)$image['numeric_score'];
-
-        $html = "
-			Current Score: $i_score
-
-			<p>".make_form(make_link("numeric_score_vote"))."
-			<input type='hidden' name='image_id' value='$i_image_id'>
-			<input type='hidden' name='vote' value='1'>
-			<input type='submit' value='Vote Up'>
-			</form>
-
-			".make_form(make_link("numeric_score_vote"))."
-			<input type='hidden' name='image_id' value='$i_image_id'>
-			<input type='hidden' name='vote' value='0'>
-			<input type='submit' value='Remove Vote'>
-			</form>
-
-			".make_form(make_link("numeric_score_vote"))."
-			<input type='hidden' name='image_id' value='$i_image_id'>
-			<input type='hidden' name='vote' value='-1'>
-			<input type='submit' value='Vote Down'>
-			</form>
-		";
-        if ($user->can(Permissions::EDIT_OTHER_VOTE)) {
-            $html .= make_form(make_link("numeric_score/remove_votes_on"))."
-			<input type='hidden' name='image_id' value='$i_image_id'>
-			<input type='submit' value='Remove All Votes'>
-			</form>
-
-			<br><div id='votes-content'>
-				<a
-					href='".make_link("numeric_score_votes/$i_image_id")."'
-					onclick='$(\"#votes-content\").load(\"".make_link("numeric_score_votes/$i_image_id")."\"); return false;'
-				>See All Votes</a>
-			</div>
-			";
+        $vote_form = function (int $image_id, int $vote, string $text): HTMLElement {
+            return SHM_SIMPLE_FORM(
+                make_link("numeric_score/vote"),
+                INPUT(['type' => 'hidden', 'name' => 'image_id', 'value' => $image_id]),
+                INPUT(['type' => 'hidden', 'name' => 'vote', 'value' => $vote]),
+                SHM_SUBMIT($text)
+            );
+        };
+        $remove_votes = null;
+        $voters = null;
+        if (Ctx::$user->can(NumericScorePermission::EDIT_OTHER_VOTE)) {
+            $remove_votes = SHM_SIMPLE_FORM(
+                make_link("numeric_score/remove_votes_on"),
+                INPUT(['type' => 'hidden', 'name' => 'image_id', 'value' => $image->id]),
+                SHM_SUBMIT('Remove All Votes')
+            );
+            $voters = emptyHTML(
+                BR(),
+                DIV(
+                    ["id" => "votes-content"],
+                    A(
+                        [
+                            "href" => make_link("numeric_score/votes/$image->id"),
+                            "onclick" => '$("#votes-content").load("'.make_link("numeric_score/votes/$image->id").'"); return false;',
+                        ],
+                        "See All Votes"
+                    )
+                ),
+            );
         }
-        $page->add_block(new Block("Post Score", rawHTML($html), "left", 20));
+        $html = emptyHTML(
+            $vote_form($image->id, 1, "Vote Up"),
+            $vote_form($image->id, 0, "Remove Vote"),
+            $vote_form($image->id, -1, "Vote Down"),
+            $remove_votes,
+            $voters
+        );
+        Ctx::$page->add_block(new Block("Post Score: " . $image['numeric_score'], $html, "left", 20, id: "Post_Scoreleft"));
     }
 
     public function get_nuller(User $duser): void
     {
-        global $user, $page;
-        $html = make_form(make_link("numeric_score/remove_votes_by"))."
-			<input type='hidden' name='user_id' value='{$duser->id}'>
-			<input type='submit' value='Delete all votes by this user'>
-			</form>
-		";
-        $page->add_block(new Block("Votes", rawHTML($html), "main", 80));
+        $html = SHM_SIMPLE_FORM(
+            make_link("numeric_score/remove_votes_by"),
+            INPUT(["type" => "hidden", "name" => "user_id", "value" => $duser->id]),
+            SHM_SUBMIT("Delete all votes by this user")
+        );
+        Ctx::$page->add_block(new Block("Votes", $html, "main", 80));
     }
 
     /**
      * @param Image[] $images
      */
-    public function view_popular(array $images, string $totaldate, string $current, string $name, string $fmt): void
-    {
-        global $page, $config;
-
-        $pop_images = "";
+    public function view_popular(
+        array $images,
+        string $current,
+        Url $b_dte,
+        Url $f_dte,
+    ): void {
+        $pop_images = [];
         foreach ($images as $image) {
-            $pop_images .= $this->build_thumb($image)."\n";
+            $pop_images[] = $this->build_thumb($image);
         }
 
-        $b_dte = make_link("popular_by_$name", date($fmt, \Safe\strtotime("-1 $name", \Safe\strtotime($totaldate))));
-        $f_dte = make_link("popular_by_$name", date($fmt, \Safe\strtotime("+1 $name", \Safe\strtotime($totaldate))));
+        $html = emptyHTML(
+            H3(
+                ["style" => "text-align: center;"],
+                A(["href" => $b_dte], "<<"),
+                " $current ",
+                A(["href" => $f_dte], ">>")
+            ),
+            BR(),
+            joinHTML("\n", $pop_images)
+        );
 
-        $html = "\n".
-            "<h3 style='text-align: center;'>\n".
-            "	<a href='{$b_dte}'>&laquo;</a> {$current} <a href='{$f_dte}'>&raquo;</a>\n".
-            "</h3>\n".
-            "<br/>\n".$pop_images;
-
-
-        $nav_html = "<a href=".make_link().">Index</a>";
-
-        $page->set_title($config->get_string(SetupConfig::TITLE));
-        $page->add_block(new Block("Navigation", rawHTML($nav_html), "left", 10));
-        $page->add_block(new Block(null, rawHTML($html), "main", 30));
+        Ctx::$page->set_title("Popular Posts");
+        $this->display_navigation();
+        Ctx::$page->add_block(new Block(null, $html, "main", 30));
     }
 
-
-    public function get_help_html(): string
+    public function get_help_html(): HTMLElement
     {
-        return '<p>Search for posts that have received numeric scores by the score or by the scorer.</p>
-        <div class="command_example">
-        <code>score=1</code>
-        <p>Returns posts with a score of 1.</p>
-        </div>
-        <div class="command_example">
-        <code>score>0</code>
-        <p>Returns posts with a score of 1 or more.</p>
-        </div>
-        <p>Can use &lt;, &lt;=, &gt;, &gt;=, or =.</p>
-
-        <div class="command_example">
-        <code>upvoted_by=username</code>
-        <p>Returns posts upvoted by "username".</p>
-        </div>
-        <div class="command_example">
-        <code>upvoted_by_id=123</code>
-        <p>Returns posts upvoted by user 123.</p>
-        </div>
-        <div class="command_example">
-        <code>downvoted_by=username</code>
-        <p>Returns posts downvoted by "username".</p>
-        </div>
-        <div class="command_example">
-        <code>downvoted_by_id=123</code>
-        <p>Returns posts downvoted by user 123.</p>
-        </div>
-
-        <div class="command_example">
-        <code>order:score_desc</code>
-        <p>Sorts the search results by score, descending.</p>
-        </div>
-        <div class="command_example">
-        <code>order:score_asc</code>
-        <p>Sorts the search results by score, ascending.</p>
-        </div>
-        ';
+        return emptyHTML(
+            P("Search for posts that have received numeric scores by the score or by the scorer."),
+            SHM_COMMAND_EXAMPLE("score=1", "Returns posts with a score of 1"),
+            SHM_COMMAND_EXAMPLE("score>0", "Returns posts with a score of 1 or more"),
+            P("Can use <, <=, >, >=, or =."),
+            SHM_COMMAND_EXAMPLE("upvoted_by=username", "Returns posts upvoted by 'username'"),
+            SHM_COMMAND_EXAMPLE("downvoted_by=username", "Returns posts downvoted by 'username'"),
+            SHM_COMMAND_EXAMPLE("order:score_desc", "Returns posts ordered by score in descending order"),
+            SHM_COMMAND_EXAMPLE("order:score_asc", "Returns posts ordered by score in ascending order")
+        );
     }
 }

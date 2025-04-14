@@ -4,62 +4,120 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, H1, IMG, SMALL, SPAN, joinHTML};
+use function MicroHTML\{BODY, DIV, INPUT, META, TITLE, emptyHTML};
 
-use function MicroHTML\{BODY, emptyHTML, TITLE, META, rawHTML};
+use MicroHTML\HTMLElement;
 
 class HomeTheme extends Themelet
 {
-    public function display_page(Page $page, string $sitename, HTMLElement $body): void
+    public function display_page(string $sitename, HTMLElement $body): void
     {
-        $page->set_mode(PageMode::DATA);
-        $page->add_auto_html_headers();
-
-        $page->set_data((string)$page->html_html(
+        Ctx::$page->add_auto_html_headers();
+        Ctx::$page->set_data(MimeType::HTML, (string)Ctx::$page->html_html(
             emptyHTML(
                 TITLE($sitename),
                 META(["http-equiv" => "Content-Type", "content" => "text/html;charset=utf-8"]),
                 META(["name" => "viewport", "content" => "width=device-width, initial-scale=1"]),
-                $page->get_all_html_headers(),
+                ...Ctx::$page->get_all_html_headers(),
             ),
             $body
         ));
     }
 
-    public function build_body(string $sitename, string $main_links, string $main_text, string $contact_link, string $num_comma, string $counter_text): HTMLElement
-    {
-        global $page;
+    public function build_body(
+        string $sitename,
+        HTMLElement $main_links,
+        ?string $main_text,
+        ?string $contact_link,
+        int $post_count,
+    ): HTMLElement {
+        $page = Ctx::$page;
         $page->set_layout("front-page");
 
-        $main_links_html = empty($main_links) ? "" : "<div class='space' id='links'>$main_links</div>";
-        $message_html = empty($main_text) ? "" : "<div class='space' id='message'>$main_text</div>";
-        $counter_html = empty($counter_text) ? "" : "<div class='space' id='counter'>$counter_text</div>";
-        $contact_link = empty($contact_link) ? "" : "<br><a href='$contact_link'>Contact</a> &ndash;";
-        $search_html = "
-			<div class='space' id='search'>
-				<form action='".search_link()."' method='GET'>
-				<input name='search' size='30' type='search' value='' class='autocomplete_tags' autofocus='autofocus' />
-				<input type='hidden' name='q' value='post/list'>
-				<input type='submit' value='Search'/>
-				</form>
-			</div>
-		";
         return BODY(
             $page->body_attrs(),
-            rawHTML("
-		<div id='front-page'>
-			<h1><a style='text-decoration: none;' href='".make_link()."'><span>$sitename</span></a></h1>
-			$main_links_html
-			$search_html
-			$message_html
-			$counter_html
-			<div class='space' id='foot'>
-				<small><small>
-				$contact_link" . (empty($num_comma) ? "" : " Serving $num_comma posts &ndash;") . "
-				Running <a href='https://code.shishnet.org/shimmie2/'>Shimmie2</a>
-				</small></small>
-			</div>
-		</div>")
+            DIV(
+                ["id" => "front-page"],
+                $this->build_title($sitename),
+                $this->build_links($main_links),
+                $this->build_search(),
+                $this->build_message($main_text),
+                $this->build_counter($post_count),
+                $this->build_footer($contact_link, $post_count),
+            ),
+        );
+    }
+
+    protected function build_title(string $sitename): HTMLElement
+    {
+        return H1(A(["href" => make_link()], SPAN($sitename)));
+    }
+
+    protected function build_links(HTMLElement $links): ?HTMLElement
+    {
+        if (empty((string)$links)) {
+            return null;
+        }
+        return DIV(["class" => "space", "id" => "links"], $links);
+    }
+
+    protected function build_search(): HTMLElement
+    {
+        return DIV(
+            ["class" => "space", "id" => "search"],
+            SHM_FORM(
+                action: search_link(),
+                method: "GET",
+                children: [
+                    INPUT(["name" => "search", "size" => "30", "type" => "search", "class" => "autocomplete_tags", "autofocus" => true]),
+                    " ",
+                    SHM_SUBMIT("Search")
+                ]
+            )
+        );
+    }
+
+    protected function build_message(?string $main_text): ?HTMLElement
+    {
+        if (empty($main_text)) {
+            return null;
+        }
+        return DIV(["class" => "space", "id" => "message"], $main_text);
+    }
+
+    protected function build_counter(int $post_count): ?HTMLElement
+    {
+        $counter_dir = Ctx::$config->get(HomeConfig::COUNTER);
+        if ($counter_dir === 'none' || $counter_dir === 'text-only') {
+            return null;
+        }
+
+        $base_href = Url::base();
+        $counter_digits = [];
+        foreach (str_split((string)$post_count) as $cur) {
+            $counter_digits[] = IMG([
+                'class' => 'counter-img',
+                'alt' => $cur,
+                'src' => "$base_href/ext/home/counters/$counter_dir/$cur.gif"
+            ]);
+        }
+        return DIV(["class" => "space", "id" => "counter"], joinHTML('', $counter_digits));
+    }
+
+    protected function build_footer(?string $contact_link, int $post_count): HTMLElement
+    {
+        $num_comma = number_format($post_count);
+        return DIV(
+            ["class" => "space", "id" => "foot"],
+            SMALL(SMALL(
+                empty($contact_link)
+                    ? null
+                    : emptyHTML(A(["href" => $contact_link], "Contact"), " - "),
+                " Serving $num_comma posts - ",
+                " Running ",
+                A(["href" => "https://code.shishnet.org/shimmie2/"], "Shimmie2")
+            ))
         );
     }
 }

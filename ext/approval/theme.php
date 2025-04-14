@@ -4,10 +4,10 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
-
-use function MicroHTML\emptyHTML;
 use function MicroHTML\{BUTTON,P};
+use function MicroHTML\emptyHTML;
+
+use MicroHTML\HTMLElement;
 
 class ApprovalTheme extends Themelet
 {
@@ -22,15 +22,13 @@ class ApprovalTheme extends Themelet
 
     public function display_admin_form(): void
     {
-        global $page;
-
         $form = SHM_SIMPLE_FORM(
-            "admin/approval",
+            make_link("admin/approval"),
             BUTTON(["name" => 'approval_action', "value" => 'approve_all'], "Approve All Posts"),
             " ",
             BUTTON(["name" => 'approval_action', "value" => 'disapprove_all'], "Disapprove All Posts"),
         );
 
-        $page->add_block(new Block("Approval", $form));
+        Ctx::$page->add_block(new Block("Approval", $form));
     }
 }

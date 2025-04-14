@@ -4,32 +4,28 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-class LogLogstash extends Extension
+final class LogLogstash extends Extension
 {
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_string("log_logstash_host", "127.0.0.1:1234");
-    }
+    public const KEY = "log_logstash";
 
     public function onLog(LogEvent $event): void
     {
-        global $user;
+        $username = isset(Ctx::$user) ? Ctx::$user->name : "Anonymous";
 
         try {
             $data = [
                 "@type" => "shimmie",
                 "@message" => $event->message,
                 "@fields" => [
-                    "username" => ($user && $user->name) ? $user->name : "Anonymous",
+                    "username" => $username,
                     "section" => $event->section,
                     "priority" => $event->priority,
-                    "time" => $event->time,
+                    "time" => time(),
                 ],
                 #"@request" => $_SERVER,
                 "@request" => [
-                    "UID" => get_request_id(),
-                    "REMOTE_ADDR" => get_real_ip(),
+                    "UID" => Log::get_request_id(),
+                    "REMOTE_ADDR" => Network::get_real_ip(),
                 ],
             ];
 
@@ -44,9 +40,7 @@ class LogLogstash extends Extension
      */
     private function send_data(array $data): void
     {
-        global $config;
-
-        $host = $config->get_string("log_logstash_host");
+        $host = Ctx::$config->get(LogLogstashConfig::HOST);
         if (!$host) {
             return;
         }
@@ -55,7 +49,7 @@ class LogLogstash extends Extension
             $parts = explode(":", $host);
             $host = $parts[0];
             $port = (int)$parts[1];
-            $fp = fsockopen("udp://$host", $port, $errno, $errstr);
+            $fp = fsockopen("udp://$host", $port);
             if (!$fp) {
                 return;
             }

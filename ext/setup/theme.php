@@ -4,131 +4,52 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
-use MicroHTML\HTMLElement;
+use function MicroHTML\{A, DIV, H3, INPUT, SECTION};
 
-use function MicroHTML\INPUT;
-use function MicroHTML\TABLE;
-use function MicroHTML\TBODY;
-use function MicroHTML\TD;
-use function MicroHTML\TEXTAREA;
-use function MicroHTML\TFOOT;
-use function MicroHTML\TH;
-use function MicroHTML\THEAD;
-use function MicroHTML\TR;
-use function MicroHTML\rawHTML;
+use MicroHTML\HTMLElement;
 
 class SetupTheme extends Themelet
 {
-    /*
+    /**
      * Display a set of setup option blocks
-     *
-     * $panel = the container of the blocks
-     * $panel->blocks the blocks to be displayed, unsorted
      *
      * It's recommended that the theme sort the blocks before doing anything
      * else, using:  usort($panel->blocks, "blockcmp");
      *
      * The page should wrap all the options in a form which links to setup_save
+     *
+     * @param array<Block> $config_blocks
      */
-    public function display_page(Page $page, SetupPanel $panel): void
+    public function display_page(array $config_blocks): void
     {
-        usort($panel->blocks, "Shimmie2\blockcmp");
+        usort($config_blocks, Block::cmp(...));
 
-        /*
-         * Try and keep the two columns even; count the line breaks in
-         * each an calculate where a block would work best
-         */
-        $setupblock_html = "";
-        foreach ($panel->blocks as $block) {
-            $setupblock_html .= $this->sb_to_html($block);
-        }
-
-        $table = "
-			".make_form(make_link("setup/save"))."
-				<div class='setupblocks'>$setupblock_html</div>
-				<input class='setupsubmit' type='submit' value='Save Settings'>
-			</form>
-			";
-
-        $page->set_title("Shimmie Setup");
-        $page->add_block(new Block("Navigation", $this->build_navigation(), "left", 0));
-        $page->add_block(new Block(null, rawHTML($table), id: "Setupmain"));
-    }
-
-    /**
-     * @param array<string, mixed> $options
-     */
-    public function display_advanced(Page $page, array $options): void
-    {
-        $rows = TBODY();
-        ksort($options);
-        foreach ($options as $name => $value) {
-            $ext = ConfigGroup::get_group_for_entry_by_name($name);
-            if ($ext) {
-                $ext_name = \Safe\preg_replace("#Shimmie2.(.*)Config#", '$1', $ext::class);
-            } else {
-                $ext_name = "";
-            }
-
-            if (is_null($value)) {
-                $value = '';
-            }
-
-            $valbox = TD();
-            if (is_string($value) && str_contains($value, "\n")) {
-                $valbox->appendChild(TEXTAREA(
-                    ['name' => "_config_$name", 'cols' => 50, 'rows' => 4],
-                    $value,
-                ));
-            } else {
-                $valbox->appendChild(INPUT(
-                    ['type' => 'text', 'name' => "_config_$name", 'value' => $value],
-                ));
-            }
-            $valbox->appendChild(INPUT(
-                ['type' => 'hidden', 'name' => '_type_' . $name, 'value' => 'string'],
-            ));
-
-            $rows->appendChild(TR(TD($ext_name), TD($name), $valbox));
+        $blocks = DIV(["class" => "setupblocks"]);
+        foreach ($config_blocks as $block) {
+            $blocks->appendChild($this->sb_to_html($block));
         }
 
         $table = SHM_SIMPLE_FORM(
-            "setup/save",
-            TABLE(
-                ['id' => 'settings', 'class' => 'zebra advanced_settings'],
-                THEAD(TR(
-                    TH(['width' => '20%'], 'Group'),
-                    TH(['width' => '20%'], 'Name'),
-                    TH('Value'),
-                )),
-                $rows,
-                TFOOT(TR(
-                    TD(["colspan" => 3], INPUT(['type' => 'submit', 'value' => 'Save Settings']))
-                )),
-            )
+            make_link("setup/save"),
+            $blocks,
+            INPUT(['class' => 'setupsubmit', 'type' => 'submit', 'value' => 'Save Settings'])
         );
 
-        $page->set_title("Shimmie Setup");
-        $page->add_block(new Block("Navigation", $this->build_navigation(), "left", 0));
-        $page->add_block(new Block("Setup", $table));
+        $nav = @$_GET["advanced"] === "on" ?
+            A(["href" => make_link("setup")], "Simple") :
+            A(["href" => make_link("setup", ["advanced" => "on"])], "Advanced");
+
+        Ctx::$page->set_title("Shimmie Setup");
+        $this->display_navigation(extra: $nav);
+        Ctx::$page->add_block(new Block(null, $table, id: "Setupmain"));
     }
 
-    protected function build_navigation(): HTMLElement
+    protected function sb_to_html(Block $block): HTMLElement
     {
-        return rawHTML("
-			<a href='".make_link()."'>Index</a>
-			<br><a href='https://github.com/shish/shimmie2/wiki/Settings'>Help</a>
-			<br><a href='".make_link("setup/advanced")."'>Advanced</a>
-		");
-    }
-
-    protected function sb_to_html(SetupBlock $block): string
-    {
-        return "
-			<section class='setupblock'>
-				<h3>{$block->header}</h3>
-				<div class='blockbody'>{$block->str_body}</div>
-			</section>
-		";
+        return SECTION(
+            ['class' => 'setupblock'],
+            H3($block->header),
+            DIV(['class' => 'blockbody'], $block->body),
+        );
     }
 }

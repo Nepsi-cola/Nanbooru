@@ -6,33 +6,28 @@ namespace Shimmie2;
 
 use function MicroHTML\LINK;
 
-class BrowserSearch extends Extension
+final class BrowserSearch extends Extension
 {
-    public function onInitExt(InitExtEvent $event): void
-    {
-        global $config;
-        $config->set_default_string("search_suggestions_results_order", 'a');
-    }
+    public const KEY = "browser_search";
 
     public function onPageRequest(PageRequestEvent $event): void
     {
-        global $config, $database, $page;
+        global $database;
 
         // Add in header code to let the browser know that the search plugin exists
         // We need to build the data for the header
-        $search_title = $config->get_string(SetupConfig::TITLE);
-        $search_file_url = make_link('browser_search.xml');
-        $page->add_html_header(LINK([
+        $search_title = Ctx::$config->get(SetupConfig::TITLE);
+        Ctx::$page->add_html_header(LINK([
             'rel' => 'search',
             'type' => 'application/opensearchdescription+xml',
             'title' => $search_title,
-            'href' => $search_file_url
+            'href' => make_link('browser_search.xml')
         ]));
 
         // The search.xml file that is generated on the fly
         if ($event->page_matches("browser_search.xml")) {
             // First, we need to build all the variables we'll need
-            $search_title = $config->get_string(SetupConfig::TITLE);
+            $search_title = Ctx::$config->get(SetupConfig::TITLE);
             $search_form_url =  search_link(['{searchTerms}']);
             $suggenton_url = make_link('browser_search/')."{searchTerms}";
             $icon_b64 = base64_encode(\Safe\file_get_contents("ext/static_files/static/favicon.ico"));
@@ -52,12 +47,10 @@ class BrowserSearch extends Extension
 			";
 
             // And now to send it to the browser
-            $page->set_mode(PageMode::DATA);
-            $page->set_mime(MimeType::XML);
-            $page->set_data($xml);
+            Ctx::$page->set_data(MimeType::XML, $xml);
         } elseif ($event->page_matches("browser_search/{tag_search}")) {
-            $suggestions = $config->get_string("search_suggestions_results_order");
-            if ($suggestions == "n") {
+            $suggestions = Ctx::$config->get(BrowserSearchConfig::RESULTS_ORDER);
+            if ($suggestions === "n") {
                 return;
             }
 
@@ -65,7 +58,7 @@ class BrowserSearch extends Extension
             $tag_search = $event->get_arg('tag_search');
 
             // Now to get DB results
-            if ($suggestions == "a") {
+            if ($suggestions === "a") {
                 $order = "tag ASC";
             } else {
                 $order = "count DESC";
@@ -77,19 +70,7 @@ class BrowserSearch extends Extension
 
             // And to do stuff with it. We want our output to look like:
             // ["shimmie",["shimmies","shimmy","shimmie","21 shimmies","hip shimmies","skea shimmies"],[],[]]
-            $page->set_mode(PageMode::DATA);
-            $page->set_data(\Safe\json_encode([$tag_search, $tags, [], []]));
+            Ctx::$page->set_data(MimeType::JSON, \Safe\json_encode([$tag_search, $tags, [], []]));
         }
-    }
-
-    public function onSetupBuilding(SetupBuildingEvent $event): void
-    {
-        $sort_by = [];
-        $sort_by['Alphabetical'] = 'a';
-        $sort_by['Tag Count'] = 't';
-        $sort_by['Disabled'] = 'n';
-
-        $sb = $event->panel->create_new_block("Browser Search");
-        $sb->add_choice_option("search_suggestions_results_order", $sort_by, "Sort the suggestions by:");
     }
 }
