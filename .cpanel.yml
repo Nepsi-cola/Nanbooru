@@ -9,15 +9,15 @@ deployment:
     - export DEPLOYPATH=/home/emmyther/public_html
     - export REPOPATH=/home/emmyther/repositories/Nanbooru
     # Remove previous old files, if any.
-    - /bin/rm -Rf ${DEPLOYPATH}_old
+    #- /bin/rm -Rf ${DEPLOYPATH}_old
     # Copy old site files to another directory.
-    - /bin/cp -R ${DEPLOYPATH} ${DEPLOYPATH}_old
+    #- /bin/cp -R ${DEPLOYPATH} ${DEPLOYPATH}_old
     # Back-up custom files.
     - /bin/bash /home/emmyther/backup/backup.sh
     # Sync repository files to the deploy target path, excluding .git folder.
     - /bin/rsync -aP --exclude '.git' --exclude '.well-known' ${REPOPATH}/ ${DEPLOYPATH}
     # Run the replacement script.
-    - /bin/bash /home/emmyther/backup/replace.sh    
+    #- /bin/bash /home/emmyther/backup/replace.sh    
     # Set correct permissions.
     - /bin/bash /home/emmyther/backup/chmod.sh
 #    - /bin/chmod 755 ${DEPLOYPATH}
