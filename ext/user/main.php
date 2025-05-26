@@ -119,11 +119,10 @@ final class LoginResult
     }
 }
 
+/** @extends Extension<UserPageTheme> */
 final class UserPage extends Extension
 {
     public const KEY = "user";
-    /** @var UserPageTheme $theme */
-    public Themelet $theme;
 
     public function onUserLogin(UserLoginEvent $event): void
     {
@@ -692,6 +691,8 @@ final class UserPage extends Extension
     private function delete_user(int $uid, bool $with_images = false, bool $with_comments = false): void
     {
         global $database;
+
+        Ctx::$event_bus->set_timeout(null);
 
         $duser = User::by_id($uid);
         Log::warning("user", "Deleting user #{$uid} (@{$duser->name})");

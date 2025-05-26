@@ -8,24 +8,43 @@ parameters:
     - themes
   typeAliases:
     tag-string: non-empty-string
-    hash-string: non-empty-string&internal-hash-string
     header-array: "array<string,string|string[]>"
     sql-params-array: "array<string,string|int|bool|null>"
   ignoreErrors:
     - message: '#Function .* is unsafe to use.*$#'
     - message: '#Path in include_once\(\) "data/.*" is not a file or it does not exist.#'
   reportMaybesInMethodSignatures: false
-  reportMaybesInPropertyPhpDocTypes: false
+  reportMaybesInPropertyPhpDocTypes: true
   strictRules:
     booleansInConditions: false
     disallowedEmpty: false
     disallowedShortTernary: false
     noVariableVariables: false
+  matchyStrings:
+    types:
+      url-string:
+        regex: '#^(http://|https://|/|$)#'
+      page-string:
+        regex: '/^(|[a-z\$][a-zA-Z0-9\/_:\$\.]*)$/'
+      fragment-string:
+        regex: '/^[a-z\-=]+$/'
+      hash-string:
+        regex: '#^[0-9a-fA-F]{32}$#'
 includes:
   - vendor/thecodingmachine/phpstan-safe-rule/phpstan-safe-rule.neon
   - vendor/phpstan/phpstan-strict-rules/rules.neon
+parametersSchema:
+  matchyStrings: structure([
+    types: arrayOf(anyOf(
+        structure([
+            regex: string()
+        ])
+    ))
+  ])
 services:
-  - class: Shimmie2\GenericStringTypeNodeResolverExtension
+  - class: Shimmie2\MatchyStringTypeNodeResolverExtension
     tags: [phpstan.phpDoc.typeNodeResolverExtension]
+    arguments:
+      types: %matchyStrings.types%
   - class: Shimmie2\ConfigGetReturnTypeExtension
     tags: [phpstan.broker.dynamicMethodReturnTypeExtension]

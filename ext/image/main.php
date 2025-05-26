@@ -63,7 +63,8 @@ final class ImageIO extends Extension
 
     public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
     {
-        if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
+        $image = Image::by_id_ex($event->image->id);
+        if ($this->can_user_delete_image(Ctx::$user, $image)) {
             $event->add_part(SHM_FORM(
                 action: make_link("image/delete"),
                 id: "image_delete_form",
@@ -77,7 +78,7 @@ final class ImageIO extends Extension
 
     public function onCliGen(CliGenEvent $event): void
     {
-        $event->app->register('delete')
+        $event->app->register('post:delete')
             ->addArgument('id', InputArgument::REQUIRED)
             ->setDescription('Delete a specific post')
             ->setCode(function (InputInterface $input, OutputInterface $output): int {
@@ -186,11 +187,11 @@ final class ImageIO extends Extension
             $page->set_data(MimeType::TEXT, "");
         } else {
             $page->add_http_header("Last-Modified: $gmdate_mod");
-            if ($type !== "thumb") {
-                $page->set_filename($image->get_nice_image_name(), 'inline');
+            if ($type === "thumb") {
+                $page->set_file($mime, $file);
+            } else {
+                $page->set_file($mime, $file, filename: $image->get_nice_image_name(), disposition: "inline");
             }
-
-            $page->set_file($mime, $file);
 
             if (Ctx::$config->get(ImageConfig::EXPIRES)) {
                 $expires = date(DATE_RFC1123, time() + Ctx::$config->get(ImageConfig::EXPIRES));

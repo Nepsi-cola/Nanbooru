@@ -8,11 +8,10 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\{InputArgument, InputInterface};
 use Symfony\Component\Console\Output\OutputInterface;
 
+/** @extends Extension<BulkAddCSVTheme> */
 final class BulkAddCSV extends Extension
 {
     public const KEY = "bulk_add_csv";
-    /** @var BulkAddCSVTheme */
-    protected Themelet $theme;
 
     public function onPageRequest(PageRequestEvent $event): void
     {
@@ -102,7 +101,7 @@ final class BulkAddCSV extends Extension
             $list .= "<br>".html_escape("$shortpath (".implode(", ", $tags).")... ");
             if (file_exists($csvdata[0]) && is_file($csvdata[0])) {
                 try {
-                    $this->add_image($fullpath, $shortpath, $tags, $source, $rating, $thumbfile);
+                    $this->add_image(new Path($fullpath), $shortpath, $tags, $source, $rating, new Path($thumbfile));
                     $list .= "ok\n";
                 } catch (\Exception $ex) {
                     $list .= "failed:<br>". $ex->getMessage();

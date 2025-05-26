@@ -56,13 +56,11 @@ final class AddAutoTagException extends SCoreException
 {
 }
 
+/** @extends Extension<AutoTaggerTheme> */
 final class AutoTagger extends Extension
 {
     public const KEY = "auto_tagger";
     public const VERSION_KEY = "ext_auto_tagger_ver";
-
-    /** @var AutoTaggerTheme */
-    protected Themelet $theme;
 
     public function onPageRequest(PageRequestEvent $event): void
     {
@@ -89,8 +87,7 @@ final class AutoTagger extends Extension
             $this->theme->display_auto_tagtable($t->table($t->query()), $t->paginator());
         }
         if ($event->page_matches("auto_tag/export/auto_tag.csv")) {
-            $page->set_filename("auto_tag.csv");
-            $page->set_data(MimeType::CSV, $this->get_auto_tag_csv(Ctx::$database));
+            $page->set_data(MimeType::CSV, $this->get_auto_tag_csv(Ctx::$database), filename: "auto_tag.csv");
         }
         if ($event->page_matches("auto_tag/import", method: "POST", permission: AutoTaggerPermission::MANAGE_AUTO_TAG)) {
             if (count($_FILES) > 0) {
