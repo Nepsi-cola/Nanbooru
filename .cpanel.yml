@@ -1,18 +1,19 @@
 # https://stackoverflow.com/questions/53676830/set-up-cpanel-yml-file-to-upload-everything---deployment
-tasks:
-  # NOTE: public_html on cPanel must not be removed or renamed.
-  # This folder has owner USER:nobody, and the USER user does not have
-  # access to change owner. So this folder must stay as-is to keep the nobody
-  # group, which is critical to the site working. A new folder won't work.
-  - export DEPLOYPATH=/home/emmyther/public_html
-  - export REPOPATH=/home/emmyther/repositories/Nanbooru
+deployment:
+  tasks:
+    # NOTE: public_html on cPanel must not be removed or renamed.
+    # This folder has owner USER:nobody, and the USER user does not have
+    # access to change owner. So this folder must stay as-is to keep the nobody
+    # group, which is critical to the site working. A new folder won't work.
+    - export DEPLOYPATH=/home/emmyther/public_html
+    - export REPOPATH=/home/emmyther/repositories/Nanbooru
 
-  # Back-up custom files.
-  - /bin/bash /home/emmyther/backup/backup.sh
+    # Back-up custom files.
+    - /bin/bash /home/emmyther/backup/backup.sh
 
-  # Sync repository files to the deploy target path, excluding .git folder,
-  # and delete obsolete files from the deploy path.
-  - /bin/rsync -aP --delete --exclude '.git' --exclude '.well-known' ${REPOPATH}/ ${DEPLOYPATH}
+    # Sync repository files to the deploy target path, excluding .git folder,
+    # and delete obsolete files from the deploy path.
+    - /bin/rsync -aP --delete --exclude '.git' --exclude '.well-known' ${REPOPATH}/ ${DEPLOYPATH}
 
-  # Set correct permissions.
-  - /bin/bash /home/emmyther/backup/chmod.sh
+    # Set correct permissions.
+    - /bin/bash /home/emmyther/backup/chmod.sh
