@@ -13,7 +13,7 @@ deployment:
 
     # Sync repository files to the deploy target path, excluding .git folder,
     # and delete obsolete files from the deploy path.
-    - /bin/rsync -aP --delete --exclude '.git' --exclude '.well-known' ${REPOPATH}/ ${DEPLOYPATH}
+    - /bin/rsync -aP --delete --exclude '.git' --exclude '.well-known' --exclude='.htaccess'  --exclude='data/' ${REPOPATH}/ ${DEPLOYPATH}
 
     # Set correct permissions.
     - /bin/bash /home/emmyther/backup/chmod.sh
