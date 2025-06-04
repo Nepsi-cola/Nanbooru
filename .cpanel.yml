@@ -15,7 +15,7 @@ deployment:
     # and delete obsolete files from the deploy path.
     - /bin/rsync -aP --delete --exclude '.git' --exclude '.well-known' --exclude='.htaccess'  --exclude='data/' --exclude='ext/home/counters/nandroids/' --exclude='403.shtml' --exclude='404.jpg' --exclude='404.shtml' --exclude='amythink.png' --exclude='apple-touch-icon.png' --exclude='favicon.ico' --exclude='ffmpeg' --exclude='ffprobe' --exclude='frontpagebackground.png' --exclude='Nandromeda' --exclude='roseyhugend.png' ${REPOPATH}/ ${DEPLOYPATH}
     # Run composer install in the deployment directory
-    - cd ${DEPLOYPATH} && composer install
+    - cd /home/emmyther/public_html/ && composer install
     
     # Set correct permissions.
     - /bin/bash /home/emmyther/backup/chmod.sh
