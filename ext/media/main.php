@@ -13,34 +13,11 @@ final class Media extends Extension
 {
     public const KEY = "media";
 
-    private const LOSSLESS_FORMATS = [
-        MimeType::WEBP_LOSSLESS,
-        MimeType::PNG,
-        MimeType::PSD,
-        MimeType::BMP,
-        MimeType::ICO,
-        MimeType::ANI,
-        MimeType::GIF
-    ];
-
     private const ALPHA_FORMATS = [
         MimeType::WEBP_LOSSLESS,
         MimeType::WEBP,
         MimeType::PNG,
     ];
-
-    public static function imagick_available(): bool
-    {
-        return extension_loaded("imagick");
-    }
-
-    /**
-     * High priority just so that it can be early in the settings
-     */
-    public function get_priority(): int
-    {
-        return 30;
-    }
 
     public function onPageRequest(PageRequestEvent $event): void
     {
@@ -141,8 +118,6 @@ final class Media extends Extension
 
                 break;
             case MediaEngine::IMAGICK:
-                //                if (self::imagick_available()) {
-                //                } else {
                 self::image_resize_convert(
                     $event->input_path,
                     $event->input_mime,
@@ -156,7 +131,6 @@ final class Media extends Extension
                     $event->minimize,
                     $event->allow_upscale
                 );
-                //}
                 break;
             case MediaEngine::STATIC:
                 $event->input_path->copy($event->output_path);
@@ -168,28 +142,28 @@ final class Media extends Extension
 
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
-        if ($matches = $event->matches("/^content[=|:]((video)|(audio)|(image)|(unknown))$/i")) {
+        if ($matches = $event->matches("/^content[=:](video|audio|image|unknown)$/i")) {
             $field = $matches[1];
             if ($field === "unknown") {
                 $event->add_querylet(new Querylet("video IS NULL OR audio IS NULL OR image IS NULL"));
             } else {
-                $event->add_querylet(new Querylet("$field = :true", ["true" => true]));
+                $event->add_querylet(new Querylet("$field = TRUE"));
             }
-        } elseif ($matches = $event->matches("/^ratio([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])(\d+):(\d+)$/i")) {
-            $cmp = \Safe\preg_replace('/^:/', '=', $matches[1]);
+        } elseif ($matches = $event->matches("/^ratio(:|<=|<|=|>|>=)(\d+):(\d+)$/i")) {
+            $cmp = ltrim($matches[1], ":") ?: "=";
             $args = ["width{$event->id}" => int_escape($matches[2]), "height{$event->id}" => int_escape($matches[3])];
             $event->add_querylet(new Querylet("width / :width{$event->id} $cmp height / :height{$event->id}", $args));
-        } elseif ($matches = $event->matches("/^size([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])(\d+)x(\d+)$/i")) {
+        } elseif ($matches = $event->matches("/^size(:|<=|<|=|>|>=)(\d+)x(\d+)$/i")) {
             $cmp = ltrim($matches[1], ":") ?: "=";
             $args = ["width{$event->id}" => int_escape($matches[2]), "height{$event->id}" => int_escape($matches[3])];
             $event->add_querylet(new Querylet("width $cmp :width{$event->id} AND height $cmp :height{$event->id}", $args));
-        } elseif ($matches = $event->matches("/^width([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])(\d+)$/i")) {
+        } elseif ($matches = $event->matches("/^width(:|<=|<|=|>|>=)(\d+)$/i")) {
             $cmp = ltrim($matches[1], ":") ?: "=";
             $event->add_querylet(new Querylet("width $cmp :width{$event->id}", ["width{$event->id}" => int_escape($matches[2])]));
-        } elseif ($matches = $event->matches("/^height([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])(\d+)$/i")) {
+        } elseif ($matches = $event->matches("/^height(:|<=|<|=|>|>=)(\d+)$/i")) {
             $cmp = ltrim($matches[1], ":") ?: "=";
             $event->add_querylet(new Querylet("height $cmp :height{$event->id}", ["height{$event->id}" => int_escape($matches[2])]));
-        } elseif ($matches = $event->matches("/^length([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])(.+)$/i")) {
+        } elseif ($matches = $event->matches("/^length(:|<=|<|=|>|>=)(.+)$/i")) {
             $value = parse_to_milliseconds($matches[2]);
             $cmp = ltrim($matches[1], ":") ?: "=";
             $event->add_querylet(new Querylet("length $cmp :length{$event->id}", ["length{$event->id}" => $value]));
@@ -245,109 +219,6 @@ final class Media extends Extension
         return (int)$memory_use;
     }
 
-
-    /**
-     * Creates a thumbnail using ffmpeg.
-     *
-     * @param $hash
-     * @return bool true if successful, false if not.
-     * @throws MediaException
-     */
-    public static function create_thumbnail_ffmpeg(Image $image): bool
-    {
-        $ok = false;
-        $inname = $image->get_image_filename();
-        $tmpname = shm_tempnam("ffmpeg_thumb");
-        try {
-            $outname = $image->get_thumb_filename();
-
-            $orig_size = self::video_size($inname);
-            $scaled_size = ThumbnailUtil::get_thumbnail_size($orig_size[0], $orig_size[1], true);
-
-            $command = new CommandBuilder(Ctx::$config->get(MediaConfig::FFMPEG_PATH));
-            $command->add_args("-y");
-            $command->add_args("-i", $inname->str());
-            $command->add_args("-vf", "scale=$scaled_size[0]:$scaled_size[1],thumbnail");
-            $command->add_args("-f", "image2");
-            $command->add_args("-vframes", "1");
-            $command->add_args("-c:v", "png");
-            $command->add_args($tmpname->str());
-            $command->execute();
-
-            ThumbnailUtil::create_scaled_image($tmpname, $outname, $scaled_size, new MimeType(MimeType::PNG));
-            $ok = true;
-        } finally {
-            @$tmpname->unlink();
-        }
-        return $ok;
-    }
-
-    /**
-     * @return array{
-     *     streams: array<array{
-     *         codec_type: "audio",
-     *         codec_name: string,
-     *         codec_tag_string: string,
-     *         tags?: array<string, string>
-     *     }|array{
-     *         codec_type: "video",
-     *         codec_name: string,
-     *         codec_tag_string: string,
-     *         width: int,
-     *         height: int,
-     *         coded_width: int,
-     *         coded_height: int,
-     *         pix_fmt: string,
-     *         tags?: array<string, string>
-     *     }>,
-     *     format: array{
-     *         filename: string,
-     *         nb_streams: int,
-     *         nb_programs: int,
-     *         nb_stream_groups: int,
-     *         format_name: string,
-     *         format_long_name: string,
-     *         start_time: string,
-     *         duration: string,
-     *         size: string,
-     *         bit_rate: string,
-     *         probe_score: int,
-     *         tags?: array<string, string>
-     *     }
-     * }
-     */
-    public static function get_ffprobe_data(Path $filename): array
-    {
-        $command = new CommandBuilder(Ctx::$config->get(MediaConfig::FFPROBE_PATH));
-        $command->add_args("-print_format", "json");
-        $command->add_args("-v", "quiet");
-        $command->add_args("-show_format");
-        $command->add_args("-show_streams");
-        $command->add_args($filename->str());
-        $output = $command->execute();
-        return json_decode($output, true);
-    }
-
-    public static function determine_ext(MimeType $mime): string
-    {
-        $ext = FileExtension::get_for_mime($mime);
-        if (empty($ext)) {
-            throw new ServerError("Could not determine extension for $mime");
-        }
-        return $ext;
-    }
-
-    public static function is_lossless(Path $filename, MimeType $mime): bool
-    {
-        if (in_array((string)$mime, self::LOSSLESS_FORMATS)) {
-            return true;
-        }
-        if ($mime->base === MimeType::WEBP) {
-            return MimeType::is_lossless_webp($filename);
-        }
-        return false;
-    }
-
     public static function image_resize_convert(
         Path $input_path,
         MimeType $input_mime,
@@ -368,14 +239,10 @@ final class Media extends Extension
             $alpha_color = Ctx::$config->get(ThumbnailConfig::ALPHA_COLOR);
         }
 
-        if ($output_mime->base === MimeType::WEBP && self::is_lossless($input_path, $input_mime)) {
-            $output_mime = new MimeType(MimeType::WEBP_LOSSLESS);
-        }
-
         $command = new CommandBuilder(Ctx::$config->get(MediaConfig::MAGICK_PATH));
 
         // read input
-        $input_ext = self::determine_ext($input_mime);
+        $input_ext = FileExtension::get_for_mime($input_mime);
         $command->add_args("{$input_ext}:{$input_path->str()}[0]");
 
         // strip data
@@ -449,15 +316,15 @@ final class Media extends Extension
         // format-specific compression options
         if ($output_mime->base === MimeType::PNG) {
             $command->add_args("-define", "png:compression-level=9");
-        } elseif ($output_mime->base === MimeType::WEBP && $output_mime->parameters === MimeType::LOSSLESS_PARAMETER) {
+        } elseif ($output_mime->base === MimeType::WEBP && $output_quality === 100) {
             $command->add_args("-define", "webp:lossless=true");
             $command->add_args("-quality", "100");
         } else {
-            $command->add_args("-quality", (string)Ctx::$config->get(TranscodeImageConfig::QUALITY));
+            $command->add_args("-quality", (string)$output_quality);
         }
 
         // write output
-        $output_ext = self::determine_ext($output_mime);
+        $output_ext = FileExtension::get_for_mime($output_mime);
         $command->add_args("$output_ext:{$output_filename->str()}");
 
         // go
@@ -531,137 +398,108 @@ final class Media extends Extension
             throw new MediaException("Could not create output image with dimensions $new_width x $new_height ");
         }
 
-        try {
-            // Handle transparent images
-            switch ($info[2]) {
-                case IMAGETYPE_GIF:
-                    $transparency = imagecolortransparent($image);
-                    $pallet_size = imagecolorstotal($image);
+        // Handle transparent images
+        switch ($info[2]) {
+            case IMAGETYPE_GIF:
+                $transparency = imagecolortransparent($image);
+                $pallet_size = imagecolorstotal($image);
 
-                    // If we have a specific transparent color
-                    if ($transparency >= 0 && $transparency < $pallet_size) {
-                        // Get the original image's transparent color's RGB values
-                        $transparent_color = imagecolorsforindex($image, $transparency);
+                // If we have a specific transparent color
+                if ($transparency >= 0 && $transparency < $pallet_size) {
+                    // Get the original image's transparent color's RGB values
+                    $transparent_color = imagecolorsforindex($image, $transparency);
 
-                        // Allocate the same color in the new image resource
-                        $transparency = imagecolorallocate($image_resized, $transparent_color['red'], $transparent_color['green'], $transparent_color['blue']);
-                        if ($transparency === false) {
-                            throw new MediaException("Unable to allocate transparent color");
-                        }
-
-                        // Completely fill the background of the new image with allocated color.
-                        if (imagefill($image_resized, 0, 0, $transparency) === false) {
-                            throw new MediaException("Unable to fill new image with transparent color");
-                        }
-
-                        // Set the background color for new image to transparent
-                        imagecolortransparent($image_resized, $transparency);
-                    }
-                    break;
-                case IMAGETYPE_PNG:
-                case IMAGETYPE_WEBP:
-                    //
-                    // More info here:  https://stackoverflow.com/questions/279236/how-do-i-resize-pngs-with-transparency-in-php
-                    //
-                    if (imagealphablending($image_resized, false) === false) {
-                        throw new MediaException("Unable to disable image alpha blending");
-                    }
-                    if (imagesavealpha($image_resized, true) === false) {
-                        throw new MediaException("Unable to enable image save alpha");
-                    }
-                    $transparent_color = imagecolorallocatealpha($image_resized, 255, 255, 255, 127);
-                    if ($transparent_color === false) {
+                    // Allocate the same color in the new image resource
+                    $transparency = imagecolorallocate($image_resized, $transparent_color['red'], $transparent_color['green'], $transparent_color['blue']);
+                    if ($transparency === false) {
                         throw new MediaException("Unable to allocate transparent color");
                     }
-                    if (imagefilledrectangle($image_resized, 0, 0, $new_width, $new_height, $transparent_color) === false) {
+
+                    // Completely fill the background of the new image with allocated color.
+                    if (imagefill($image_resized, 0, 0, $transparency) === false) {
                         throw new MediaException("Unable to fill new image with transparent color");
                     }
-                    break;
-            }
 
-            // Actually resize the image.
-            if (imagecopyresampled(
-                $image_resized,
-                $image,
-                0,
-                0,
-                0,
-                0,
-                $new_width,
-                $new_height,
-                $width,
-                $height
-            ) === false) {
-                throw new MediaException("Unable to copy resized image data to new image");
-            }
+                    // Set the background color for new image to transparent
+                    imagecolortransparent($image_resized, $transparency);
+                }
+                break;
+            case IMAGETYPE_PNG:
+            case IMAGETYPE_WEBP:
+                //
+                // More info here:  https://stackoverflow.com/questions/279236/how-do-i-resize-pngs-with-transparency-in-php
+                //
+                if (imagealphablending($image_resized, false) === false) {
+                    throw new MediaException("Unable to disable image alpha blending");
+                }
+                if (imagesavealpha($image_resized, true) === false) {
+                    throw new MediaException("Unable to enable image save alpha");
+                }
+                $transparent_color = imagecolorallocatealpha($image_resized, 255, 255, 255, 127);
+                if ($transparent_color === false) {
+                    throw new MediaException("Unable to allocate transparent color");
+                }
+                if (imagefilledrectangle($image_resized, 0, 0, $new_width, $new_height, $transparent_color) === false) {
+                    throw new MediaException("Unable to fill new image with transparent color");
+                }
+                break;
+        }
 
-            switch ($output_mime->base) {
-                case MimeType::BMP:
-                case MimeType::JPEG:
-                    // In case of alpha channels
-                    $width = imagesx($image_resized);
-                    $height = imagesy($image_resized);
-                    $new_image = imagecreatetruecolor($width, $height);
-                    if ($new_image === false) {
-                        throw new ImageTranscodeException("Could not create image with dimensions $width x $height");
-                    }
+        // Actually resize the image.
+        if (imagecopyresampled(
+            $image_resized,
+            $image,
+            0,
+            0,
+            0,
+            0,
+            $new_width,
+            $new_height,
+            $width,
+            $height
+        ) === false) {
+            throw new MediaException("Unable to copy resized image data to new image");
+        }
 
-                    $background_color = Media::hex_color_allocate($new_image, $alpha_color);
-                    if (imagefilledrectangle($new_image, 0, 0, $width, $height, $background_color) === false) {
-                        throw new ImageTranscodeException("Could not fill background color");
-                    }
-                    if (imagecopy($new_image, $image_resized, 0, 0, 0, 0, $width, $height) === false) {
-                        throw new ImageTranscodeException("Could not copy source image to new image");
-                    }
+        switch ($output_mime->base) {
+            case MimeType::BMP:
+            case MimeType::JPEG:
+                // In case of alpha channels
+                $width = imagesx($image_resized);
+                $height = imagesy($image_resized);
+                $new_image = imagecreatetruecolor($width, $height);
+                if ($new_image === false) {
+                    throw new ImageTranscodeException("Could not create image with dimensions $width x $height");
+                }
 
-                    imagedestroy($image_resized);
-                    $image_resized = $new_image;
-                    break;
-            }
+                $background_color = Media::hex_color_allocate($new_image, $alpha_color);
+                if (imagefilledrectangle($new_image, 0, 0, $width, $height, $background_color) === false) {
+                    throw new ImageTranscodeException("Could not fill background color");
+                }
+                if (imagecopy($new_image, $image_resized, 0, 0, 0, 0, $width, $height) === false) {
+                    throw new ImageTranscodeException("Could not copy source image to new image");
+                }
 
-            $result = match ($output_mime->base) {
-                MimeType::BMP => imagebmp($image_resized, $output_filename->str(), true),
-                MimeType::WEBP => imagewebp($image_resized, $output_filename->str(), $output_quality),
-                MimeType::JPEG => imagejpeg($image_resized, $output_filename->str(), $output_quality),
-                MimeType::PNG => imagepng($image_resized, $output_filename->str(), 9),
-                MimeType::GIF => imagegif($image_resized, $output_filename->str()),
-                default => throw new MediaException("Failed to save the new image - Unsupported image type: $output_mime"),
-            };
-            if ($result === false) {
-                throw new MediaException("Failed to save the new image, function returned false when saving type: $output_mime");
-            }
-        } finally {
-            @imagedestroy($image);
-            @imagedestroy($image_resized);
+                $image_resized = $new_image;
+                break;
+        }
+
+        $result = match ($output_mime->base) {
+            MimeType::BMP => imagebmp($image_resized, $output_filename->str(), true),
+            MimeType::WEBP => imagewebp($image_resized, $output_filename->str(), $output_quality),
+            MimeType::JPEG => imagejpeg($image_resized, $output_filename->str(), $output_quality),
+            MimeType::PNG => imagepng($image_resized, $output_filename->str(), 9),
+            MimeType::GIF => imagegif($image_resized, $output_filename->str()),
+            default => throw new MediaException("Failed to save the new image - Unsupported image type: $output_mime"),
+        };
+        if ($result === false) {
+            throw new MediaException("Failed to save the new image, function returned false when saving type: $output_mime");
         }
     }
-
 
     public static function supports_alpha(MimeType $mime): bool
     {
         return MimeType::matches_array($mime, self::ALPHA_FORMATS, true);
-    }
-
-
-    /**
-     * Determines the dimensions of a video file using ffmpeg.
-     *
-     * @return array{0: positive-int, 1: positive-int}
-     */
-    public static function video_size(Path $filename): array
-    {
-        $data = Media::get_ffprobe_data($filename);
-
-        $width = 1;
-        $height = 1;
-        foreach ($data["streams"] as $stream) {
-            if ($stream["codec_type"] === "video") {
-                $width = max($width, $stream["width"]);
-                $height = max($height, $stream["height"]);
-            }
-        }
-
-        return [$width, $height];
     }
 
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
@@ -699,8 +537,8 @@ final class Media extends Extension
         }
 
         if ($this->get_version() < 5) {
-            $database->execute("UPDATE images SET image = :f WHERE ext IN ('swf','mp3','ani','flv','mp4','m4v','ogv','webm')", ["f" => false]);
-            $database->execute("UPDATE images SET image = :t WHERE ext IN ('jpg','jpeg','ico','cur','png')", ["t" => true]);
+            $database->execute("UPDATE images SET image = FALSE WHERE ext IN ('swf','mp3','ani','flv','mp4','m4v','ogv','webm')");
+            $database->execute("UPDATE images SET image = TRUE WHERE ext IN ('jpg','jpeg','ico','cur','png')");
             $this->set_version(5);
         }
     }

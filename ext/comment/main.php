@@ -6,7 +6,7 @@ namespace Shimmie2;
 
 use GQLA\{Field, Mutation, Type};
 
-use function MicroHTML\emptyHTML;
+use function MicroHTML\{emptyHTML};
 
 require_once "vendor/ifixit/php-akismet/akismet.class.php";
 
@@ -37,6 +37,19 @@ final class CommentDeletionEvent extends Event
 
 final class CommentPostingException extends InvalidInput
 {
+}
+
+/**
+ * Comment lock status is being changed on an image
+ */
+final class CommentLockSetEvent extends Event
+{
+    public function __construct(
+        public int $image_id,
+        public bool $locked
+    ) {
+        parent::__construct();
+    }
 }
 
 #[Type(name: "Comment")]
@@ -113,6 +126,7 @@ final class Comment
     #[Mutation(name: "create_comment")]
     public static function create_comment(int $post_id, string $comment): bool
     {
+        send_event(new CheckStringContentEvent($comment));
         send_event(new CommentPostingEvent($post_id, Ctx::$user, $comment));
         return true;
     }
@@ -124,10 +138,15 @@ final class CommentList extends Extension
     public const KEY = "comment";
     public const VERSION_KEY = "ext_comments_version";
 
+    public function onInitExt(InitExtEvent $event): void
+    {
+        Image::$prop_types["comments_locked"] = ImagePropType::BOOL;
+    }
+
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         $database = Ctx::$database;
-        if ($this->get_version() < 3) {
+        if ($this->get_version() < 4) {
             // shortcut to latest
             if ($this->get_version() < 1) {
                 $database->create_table("comments", "
@@ -171,6 +190,12 @@ final class CommentList extends Extension
                 $database->execute("ALTER TABLE comments ADD FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE RESTRICT");
                 $this->set_version(3);
             }
+
+            if ($this->get_version() === 3) {
+                $database->execute("ALTER TABLE images ADD COLUMN comments_locked BOOLEAN NOT NULL DEFAULT FALSE");
+                $database->execute("CREATE INDEX images_comments_locked_idx ON images(comments_locked)");
+                $this->set_version(4);
+            }
         }
     }
 
@@ -193,6 +218,7 @@ final class CommentList extends Extension
         $page = Ctx::$page;
         if ($event->page_matches("comment/add", method: "POST", permission: CommentPermission::CREATE_COMMENT)) {
             $i_iid = int_escape($event->POST->req('image_id'));
+            send_event(new CheckStringContentEvent($event->POST->req('comment')));
             send_event(new CommentPostingEvent($i_iid, Ctx::$user, $event->POST->req('comment')));
             $page->set_redirect(make_link("post/view/$i_iid", null, "comment_on_$i_iid"));
         }
@@ -316,11 +342,43 @@ final class CommentList extends Extension
 
     public function onDisplayingImage(DisplayingImageEvent $event): void
     {
-        $this->theme->display_image_comments(
-            $event->image,
-            self::get_comments($event->image->id),
-            Ctx::$user->can(CommentPermission::CREATE_COMMENT)
+        $comments_locked = (bool)Ctx::$database->get_one(
+            "SELECT comments_locked FROM images WHERE id = :id",
+            ["id" => $event->image->id]
         );
+
+        $can_post = Ctx::$user->can(CommentPermission::CREATE_COMMENT) &&
+                    (!$comments_locked || Ctx::$user->can(CommentPermission::BYPASS_COMMENT_LOCK));
+
+        $comments = self::get_comments($event->image->id);
+        $this->theme->display_image_comments($event->image, $comments, $can_post, $comments_locked);
+    }
+
+    public function onImageInfoSet(ImageInfoSetEvent $event): void
+    {
+        if (Ctx::$user->can(CommentPermission::EDIT_COMMENT_LOCK)) {
+            $comments_locked = $event->get_param('comments_locked') === "on";
+            send_event(new CommentLockSetEvent($event->image->id, $comments_locked));
+        }
+    }
+
+    public function onCommentLockSet(CommentLockSetEvent $event): void
+    {
+        if (Ctx::$user->can(CommentPermission::EDIT_COMMENT_LOCK)) {
+            Ctx::$database->execute(
+                "UPDATE images SET comments_locked = :locked WHERE id = :id",
+                ["locked" => $event->locked, "id" => $event->image_id]
+            );
+        }
+    }
+
+    public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
+    {
+        $comments_locked = (bool)Ctx::$database->get_one(
+            "SELECT comments_locked FROM images WHERE id = :id",
+            ["id" => $event->image->id]
+        );
+        $event->add_part($this->theme->get_comments_lock_editor_html($comments_locked), 42);
     }
 
     // TODO: split akismet into a separate class, which can veto the event
@@ -340,14 +398,14 @@ final class CommentList extends Extension
 
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
-        if ($matches = $event->matches("/^comments([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])(\d+)$/i")) {
+        if ($matches = $event->matches("/^comments(:|<=|<|=|>|>=)(\d+)$/i")) {
             $cmp = ltrim($matches[1], ":") ?: "=";
             $comments = $matches[2];
             $event->add_querylet(new Querylet("images.id IN (SELECT DISTINCT image_id FROM comments GROUP BY image_id HAVING count(image_id) $cmp $comments)"));
-        } elseif ($matches = $event->matches("/^commented_by[=|:](.*)$/i")) {
+        } elseif ($matches = $event->matches("/^commented_by[=:](.*)$/i")) {
             $user_id = User::name_to_id($matches[1]);
             $event->add_querylet(new Querylet("images.id IN (SELECT image_id FROM comments WHERE owner_id = $user_id)"));
-        } elseif ($matches = $event->matches("/^commented_by_userno[=|:]([0-9]+)$/i")) {
+        } elseif ($matches = $event->matches("/^commented_by_userno[=:]([0-9]+)$/i")) {
             $user_id = int_escape($matches[1]);
             $event->add_querylet(new Querylet("images.id IN (SELECT image_id FROM comments WHERE owner_id = $user_id)"));
         }
@@ -450,7 +508,7 @@ final class CommentList extends Extension
 			SELECT *
 			FROM comments
 			WHERE owner_ip = :remote_ip AND posted > now() - $window_sql
-		", ["remote_ip" => Network::get_real_ip()]);
+		", ["remote_ip" => (string)Network::get_real_ip()]);
 
         return (count($result) >= $max);
     }
@@ -459,40 +517,23 @@ final class CommentList extends Extension
      * get a hash which semi-uniquely identifies a submission form,
      * to stop spam bots which download the form once then submit
      * many times.
-     *
-     * FIXME: assumes comments are posted via HTTP...
      */
-    public static function get_hash(): string
+    public static function get_hash(int $offset = 0): string
     {
-        return md5(Network::get_real_ip() . date("%Y%m%d"));
+        return md5((string)Network::get_real_ip() . date("%Y%m%d%H", time() - $offset));
     }
 
-    private function is_spam_akismet(string $text): bool
+    private static function check_hash(string $hash): bool
     {
-        $key = Ctx::$config->get(CommentConfig::WORDPRESS_KEY);
-        if (!is_null($key) && strlen($key) > 0) {
-            $comment = [
-                'author'       => Ctx::$user->name,
-                'email'        => Ctx::$user->email,
-                'website'      => '',
-                'body'         => $text,
-                'permalink'    => '',
-                'referrer'     => $_SERVER['HTTP_REFERER'] ?? 'none',
-                'user_agent'   => $_SERVER['HTTP_USER_AGENT'] ?? 'none',
-            ];
-
-            // @phpstan-ignore-next-line
-            $akismet = new \Akismet($_SERVER['SERVER_NAME'], $key, $comment);
-
-            if ($akismet->errorsExist()) {
-                return false;
-            } else {
-                return $akismet->isSpam();
-            }
-        }
-
-        return false;
+        $valid_hashes = [
+            self::get_hash(0),
+            self::get_hash(3600),
+            self::get_hash(7200),
+        ];
+        return in_array($hash, $valid_hashes);
     }
+
+
 
     private function is_dupe(int $image_id, string $comment): bool
     {
@@ -505,19 +546,14 @@ final class CommentList extends Extension
 
     private function add_comment_wrapper(int $image_id, User $user, string $comment): void
     {
-        if (!$user->can(CommentPermission::BYPASS_COMMENT_CHECKS)) {
-            // will raise an exception if anything is wrong
-            $this->comment_checks($image_id, $user, $comment);
-        }
+        // will raise an exception if anything is wrong
+        $this->comment_checks($image_id, $user, $comment);
 
         // all checks passed
-        if ($user->is_anonymous()) {
-            Ctx::$page->add_cookie("nocache", "Anonymous Commenter", time() + 60 * 60 * 24, "/");
-        }
         Ctx::$database->execute(
             "INSERT INTO comments(image_id, owner_id, owner_ip, posted, comment) ".
                 "VALUES(:image_id, :user_id, :remote_addr, now(), :comment)",
-            ["image_id" => $image_id, "user_id" => $user->id, "remote_addr" => Network::get_real_ip(), "comment" => $comment]
+            ["image_id" => $image_id, "user_id" => $user->id, "remote_addr" => (string)Network::get_real_ip(), "comment" => $comment]
         );
         $cid = Ctx::$database->get_last_insert_id('comments_id_seq');
         $snippet = substr($comment, 0, 100);
@@ -531,19 +567,26 @@ final class CommentList extends Extension
         // basic sanity checks
         if (!Ctx::$user->can(CommentPermission::CREATE_COMMENT)) {
             throw new CommentPostingException("You do not have permission to add comments");
-        } elseif (is_null(Image::by_id($image_id))) {
+        }
+
+        $image = Image::by_id($image_id);
+        if (is_null($image)) {
             throw new CommentPostingException("The image does not exist");
-        } elseif (trim($comment) === "") {
+        }
+
+        // Check if comments are locked
+        $comments_locked = $image["comments_locked"];
+        if ($comments_locked && !Ctx::$user->can(CommentPermission::BYPASS_COMMENT_LOCK)) {
+            throw new CommentPostingException("Comments are locked on this post");
+        }
+
+        if (trim($comment) === "") {
             throw new CommentPostingException("Comments need text...");
         } elseif (strlen($comment) > 9000) {
             throw new CommentPostingException("Comment too long~");
-        }
-
-        // advanced sanity checks
-        elseif (strlen($comment) / strlen(\Safe\gzcompress($comment)) > 10) {
+        } elseif (strlen($comment) / strlen(\Safe\gzcompress($comment)) > 10) {
             throw new CommentPostingException("Comment too repetitive~");
-        } elseif (Ctx::$user->is_anonymous() && ($_POST['hash'] !== self::get_hash())) {
-            Ctx::$page->add_cookie("nocache", "Anonymous Commenter", time() + 60 * 60 * 24, "/");
+        } elseif (!defined("UNITTEST") && !self::check_hash($_POST['hash'])) {
             throw new CommentPostingException(
                 "Comment submission form is out of date; refresh the ".
                     "comment form to show you aren't a spammer~"
@@ -551,17 +594,15 @@ final class CommentList extends Extension
         }
 
         // database-querying checks
-        elseif ($this->is_comment_limit_hit()) {
+        elseif (!$user->can(UserAccountsPermission::BYPASS_CONTENT_CHECKS) && $this->is_comment_limit_hit()) {
             throw new CommentPostingException("You've posted several comments recently; wait a minute and try again...");
-        } elseif ($this->is_dupe($image_id, $comment)) {
+        } elseif (!$user->can(UserAccountsPermission::BYPASS_CONTENT_CHECKS) && $this->is_dupe($image_id, $comment)) {
             throw new CommentPostingException("Someone already made that comment on that image -- try and be more original?");
         }
 
         // rate-limited external service checks last
         elseif (!Captcha::check(CommentPermission::SKIP_CAPTCHA)) {
             throw new CommentPostingException("Error in captcha");
-        } elseif (Ctx::$user->is_anonymous() && $this->is_spam_akismet($comment)) {
-            throw new CommentPostingException("Akismet thinks that your comment is spam. Try rewriting the comment, or logging in.");
         }
     }
 }

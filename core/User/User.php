@@ -206,6 +206,9 @@ final class User
 
     public function set_class(string $class): void
     {
+        if (!array_key_exists($class, UserClass::$known_classes)) {
+            throw new InvalidInput("Invalid user class: $class");
+        }
         Ctx::$database->execute("UPDATE users SET class=:class WHERE id=:id", ["class" => $class, "id" => $this->id]);
         Log::info("core-user", 'Set class for '.$this->name.' to '.$class);
     }
@@ -234,6 +237,9 @@ final class User
 
     public function set_email(string $address): void
     {
+        if (!filter_var($address, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidInput("Invalid email address");
+        }
         Ctx::$database->execute("UPDATE users SET email=:email WHERE id=:id", ["email" => $address, "id" => $this->id]);
         Log::info("core-user", 'Set email for '.$this->name);
     }
@@ -264,13 +270,11 @@ final class User
             "user",
             $this->name,
             time() + 60 * 60 * 24 * 365,
-            '/'
         );
         Ctx::$page->add_cookie(
             "session",
             $this->get_session_id(),
             time() + 60 * 60 * 24 * Ctx::$config->get(UserAccountsConfig::LOGIN_MEMORY),
-            '/'
         );
     }
 

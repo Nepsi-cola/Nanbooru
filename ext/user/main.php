@@ -12,6 +12,7 @@ use MicroCRUD\{ActionColumn, DateColumn, EnumColumn, IntegerColumn, Table, TextC
 use function MicroHTML\{A, P, emptyHTML};
 
 use MicroHTML\HTMLElement;
+use Symfony\Component\Console\Input\InputOption;
 
 final class UserNameColumn extends TextColumn
 {
@@ -129,6 +130,27 @@ final class UserPage extends Extension
         Ctx::setUser($event->user);
     }
 
+    public function onCliGen(CliGenEvent $event): void
+    {
+        $definition = $event->app->getDefinition();
+        $definition->addOption(new InputOption(
+            '--user',
+            '-u',
+            InputOption::VALUE_REQUIRED,
+            'Log in as the given user'
+        ));
+    }
+
+    public function onCliRun(CliRunEvent $event): void
+    {
+        if ($event->input->hasParameterOption(['--user', '-u'])) {
+            $name = $event->input->getParameterOption(['--user', '-u']);
+            send_event(new UserLoginEvent(User::by_name($name)));
+        } else {
+            send_event(new UserLoginEvent(User::get_anonymous()));
+        }
+    }
+
     public function onInitExt(InitExtEvent $event): void
     {
         UserClass::$loading = UserClassSource::DEFAULT;
@@ -188,6 +210,7 @@ final class UserPage extends Extension
                 RatingsPermission::EDIT_IMAGE_RATING => true,
                 RelationshipsPermission::EDIT_IMAGE_RELATIONSHIPS => true,
                 ReportImagePermission::CREATE_IMAGE_REPORT => true,
+                TermsPermission::SKIP_TERMS => true,
                 UserAccountsPermission::CHANGE_USER_SETTING => true,
             ],
             description: "The default class for people who are logged in",
@@ -272,31 +295,25 @@ final class UserPage extends Extension
         }
 
         if ($event->page_matches("user_admin/change_name", method: "POST", permission: UserAccountsPermission::EDIT_USER_NAME)) {
-            $input = validate_input([
-                'id' => 'user_id,exists',
-                'name' => 'user_name',
-            ]);
-            $duser = User::by_id($input['id']);
+            $duser = User::by_id(int_escape($event->POST->req('id')));
+            $name = $this->validate_user_name($event->POST->req('name'));
             if ($this->user_can_edit_user($user, $duser)) {
-                $duser->set_name($input['name']);
+                $duser->set_name($name);
                 $page->flash("Username changed");
                 // TODO: set login cookie if user changed themselves
                 $this->redirect_to_user($duser);
             }
         }
         if ($event->page_matches("user_admin/change_pass", method: "POST")) {
-            $input = validate_input([
-                'id' => 'user_id,exists',
-                'pass1' => 'password',
-                'pass2' => 'password',
-            ]);
-            $duser = User::by_id($input['id']);
+            $duser = User::by_id(int_escape($event->POST->req('id')));
+            $pass1 = $event->POST->req('pass1');
+            $pass2 = $event->POST->req('pass2');
             if ($this->user_can_edit_user($user, $duser)) {
-                if ($input['pass1'] !== $input['pass2']) {
+                if ($pass1 !== $pass2) {
                     throw new InvalidInput("Passwords don't match");
                 } else {
                     // FIXME: send_event()
-                    $duser->set_password($input['pass1']);
+                    $duser->set_password($pass1);
                     if ($duser->id === $user->id) {
                         $duser->set_login_cookie();
                     }
@@ -306,26 +323,21 @@ final class UserPage extends Extension
             }
         }
         if ($event->page_matches("user_admin/change_email", method: "POST")) {
-            $input = validate_input([
-                'id' => 'user_id,exists',
-                'address' => 'email',
-            ]);
-            $duser = User::by_id($input['id']);
+            $duser = User::by_id(int_escape($event->POST->req('id')));
+            $address = $event->POST->req('address');
             if ($this->user_can_edit_user($user, $duser)) {
-                $duser->set_email($input['address']);
+                $duser->set_email($address);
                 $page->flash("Email changed");
                 $this->redirect_to_user($duser);
             }
         }
         if ($event->page_matches("user_admin/change_class", method: "POST")) {
-            $input = validate_input([
-                'id' => 'user_id,exists',
-                'class' => 'user_class',
-            ]);
-            $duser = User::by_id($input['id']);
+            $duser = User::by_id(int_escape($event->POST->req('id')));
+            $class = $event->POST->req('class');
+
             // hard-coded that only admins can change people's classes
             if ($user->class->name === "admin") {
-                $duser->set_class($input['class']);
+                $duser->set_class($class);
                 $page->flash("Class changed");
                 $this->redirect_to_user($duser);
             }
@@ -395,6 +407,25 @@ final class UserPage extends Extension
         } else {
             $event->add_nav_link(make_link('user'), "Account", ["user"], "user", 10);
         }
+    }
+
+    private function validate_user_name(string $input): string
+    {
+        if (strlen($input) < 1) {
+            throw new InvalidInput("Username must be at least 1 character");
+        } elseif (!\Safe\preg_match('/^[a-zA-Z0-9-_]+$/', $input)) {
+            throw new InvalidInput(
+                "Username contains invalid characters. Allowed characters are ".
+                "letters, numbers, dash, and underscore"
+            );
+        }
+        try {
+            User::by_name($input);
+            throw new InvalidInput("That username is already taken");
+        } catch (UserNotFound $ex) {
+            // user not found is good
+        }
+        return $input;
     }
 
     private function display_stats(UserPageBuildingEvent $event): void
@@ -470,20 +501,10 @@ final class UserPage extends Extension
         if (!Ctx::$config->get(UserAccountsConfig::SIGNUP_ENABLED) && !Ctx::$user->can(UserAccountsPermission::CREATE_OTHER_USER)) {
             throw new UserCreationException("Account creation is currently disabled");
         }
-        if (strlen($name) < 1) {
-            throw new UserCreationException("Username must be at least 1 character");
-        }
-        if (!\Safe\preg_match('/^[a-zA-Z0-9-_]+$/', $name)) {
-            throw new UserCreationException(
-                "Username contains invalid characters. Allowed characters are " .
-                "letters, numbers, dash, and underscore"
-            );
-        }
         try {
-            User::by_name($name);
-            throw new UserCreationException("That username is already taken");
-        } catch (UserNotFound $ex) {
-            // user not found is good
+            $name = $this->validate_user_name($name);
+        } catch (InvalidInput $ex) {
+            throw new UserCreationException("Invalid username: " . $ex->getMessage());
         }
         if (!Captcha::check(UserAccountsPermission::SKIP_SIGNUP_CAPTCHA)) {
             throw new UserCreationException("Error in captcha");
@@ -521,8 +542,8 @@ final class UserPage extends Extension
         $event->set_user($new_user);
     }
 
-    public const USER_SEARCH_REGEX = "/^(?:poster|user)(!?)[=|:](.*)$/i";
-    public const USER_ID_SEARCH_REGEX = "/^(?:poster|user)_id(!?)[=|:]([0-9]+)$/i";
+    public const USER_SEARCH_REGEX = "/^(?:poster|user)(!?)[=:](.*)$/i";
+    public const USER_ID_SEARCH_REGEX = "/^(?:poster|user)_id(!?)[=:]([0-9]+)$/i";
 
     /**
      * @param string[] $context
@@ -548,7 +569,7 @@ final class UserPage extends Extension
         } elseif ($matches = $event->matches(self::USER_ID_SEARCH_REGEX)) {
             $user_id = int_escape($matches[2]);
             $event->add_querylet(new Querylet("images.owner_id {$matches[1]}= $user_id"));
-        } elseif (Ctx::$user->can(IPBanPermission::VIEW_IP) && $matches = $event->matches("/^(?:poster|user)_ip[=|:]([0-9\.]+)$/i")) {
+        } elseif (Ctx::$user->can(IPBanPermission::VIEW_IP) && $matches = $event->matches("/^(?:poster|user)_ip[=:]([0-9\.]+)$/i")) {
             $user_ip = $matches[1]; // FIXME: ip_escape?
             $event->add_querylet(new Querylet("images.owner_ip = '$user_ip'"));
         }
@@ -591,11 +612,11 @@ final class UserPage extends Extension
 
     private function page_logout(): void
     {
-        Ctx::$page->add_cookie("session", "", time() + 60 * 60 * 24 * Ctx::$config->get(UserAccountsConfig::LOGIN_MEMORY), "/");
+        Ctx::$page->add_cookie("session", "", time() + 60 * 60 * 24 * Ctx::$config->get(UserAccountsConfig::LOGIN_MEMORY));
         if (Ctx::$config->get(UserAccountsConfig::PURGE_COOKIE)) {
             # to keep as few versions of content as possible,
             # make cookies all-or-nothing
-            Ctx::$page->add_cookie("user", "", time() + 60 * 60 * 24 * Ctx::$config->get(UserAccountsConfig::LOGIN_MEMORY), "/");
+            Ctx::$page->add_cookie("user", "", time() + 60 * 60 * 24 * Ctx::$config->get(UserAccountsConfig::LOGIN_MEMORY));
         }
         Log::info("user", "Logged out");
         Ctx::$page->set_redirect(make_link());

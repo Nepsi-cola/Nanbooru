@@ -66,7 +66,7 @@ abstract class DataHandlerExtension extends Extension
             $image->filesize = $filesize;
             $image->hash = $filename->md5();
             // DB limits to 255 char filenames
-            $image->filename = substr($event->filename, -250);
+            $image->filename = truncate_filename($event->filename);
             $image->set_mime($event->mime);
             try {
                 send_event(new MediaCheckPropertiesEvent($image));
@@ -113,7 +113,8 @@ abstract class DataHandlerExtension extends Extension
     {
         if ($this->supported_mime($event->image->get_mime())) {
             // @phpstan-ignore-next-line
-            $this->theme->display_image($event->image);
+            $media = $this->theme->build_media($event->image);
+            Ctx::$page->add_block(new Block(null, $media, "main", 10, id: static::KEY . "_media"));
             if (Ctx::$config->get(ImageConfig::SHOW_META) && method_exists($this->theme, "display_metadata")) {
                 $this->theme->display_metadata($event->image);
             }
@@ -123,11 +124,25 @@ abstract class DataHandlerExtension extends Extension
     public function onMediaCheckProperties(MediaCheckPropertiesEvent $event): void
     {
         if ($this->supported_mime($event->image->get_mime())) {
-            $this->media_check_properties($event);
+            $properties = $this->media_check_properties($event->image);
+            if (is_null($properties)) {
+                // No properties were found, so we can't do anything
+                Log::debug(static::KEY, "No properties found for image {$event->image->hash}");
+                return;
+            }
+            $event->image->width = $properties->width ?? 0;
+            $event->image->height = $properties->height ?? 0;
+            $event->image->lossless = $properties->lossless;
+            $event->image->image = $properties->image;
+            $event->image->audio = $properties->audio;
+            $event->image->video = $properties->video;
+            $event->image->video_codec = $properties->video_codec;
+            $event->image->length = $properties->length;
+            Log::debug(static::KEY, "Scanned properties for {$event->image->hash}: " . json_encode($properties));
         }
     }
 
-    abstract protected function media_check_properties(MediaCheckPropertiesEvent $event): void;
+    abstract protected function media_check_properties(Image $image): ?MediaProperties;
     abstract protected function check_contents(Path $tmpname): bool;
     abstract protected function create_thumb(Image $image): bool;
 
@@ -136,24 +151,17 @@ abstract class DataHandlerExtension extends Extension
         return MimeType::matches_array($mime, $this::SUPPORTED_MIME);
     }
 
+    public function onBuildSupportedMimes(BuildSupportedMimesEvent $event): void
+    {
+        $event->add_mimes(array_map(fn ($mime) => new MimeType($mime), $this::SUPPORTED_MIME));
+    }
+
     /**
      * @return MimeType[]
      */
     public static function get_all_supported_mimes(): array
     {
-        $arr = [];
-        foreach (DataHandlerExtension::get_subclasses() as $class) {
-            $handler = $class->newInstance();
-            $arr = array_merge($arr, array_map(fn ($mime) => new MimeType($mime), $handler::SUPPORTED_MIME));
-        }
-
-        // Not sure how to handle this otherwise, don't want to set up a whole other event for this one class
-        if (TranscodeImageInfo::is_enabled()) {
-            $arr = array_merge($arr, TranscodeImage::get_enabled_mimes());
-        }
-
-        $arr = array_unique($arr);
-        return $arr;
+        return send_event(new BuildSupportedMimesEvent())->get_mimes();
     }
 
     /**

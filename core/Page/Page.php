@@ -32,7 +32,7 @@ class Page
 
     public function __construct()
     {
-        $this->mime = new MimeType(MimeType::HTML . "; " . MimeType::CHARSET_UTF8);
+        $this->mime = new MimeType(MimeType::HTML . "; charset=utf-8");
         if (@$_GET["flash"]) {
             $this->flash[] = $_GET['flash'];
             unset($_GET["flash"]);
@@ -82,20 +82,15 @@ class Page
      * setcookie method, but prepends the site-wide cookie prefix to
      * the $name argument before doing anything.
      */
-    public function add_cookie(string $name, string $value, int $time, string $path): void
+    public function add_cookie(string $name, string $value, int $time): void
     {
-        $full_name = SysConfig::getCookiePrefix() . "_" . $name;
-        $this->cookies[] = new Cookie($full_name, $value, $time, $path);
+        $path = ((string)Url::base()) . "/";
+        $this->cookies[] = new Cookie("shm_$name", $value, $time, $path);
     }
 
     public function get_cookie(string $name): ?string
     {
-        $full_name = SysConfig::getCookiePrefix() . "_" . $name;
-        if (isset($_COOKIE[$full_name])) {
-            return $_COOKIE[$full_name];
-        } else {
-            return null;
-        }
+        return $_COOKIE["shm_$name"] ?? null;
     }
 
     public function send_headers(): void
@@ -104,6 +99,10 @@ class Page
             header("HTTP/1.1 {$this->code} Shimmie");
             header("Content-type: " . $this->mime);
             header("X-Powered-By: Shimmie-" . SysConfig::getVersion());
+            $dbtime = round(Ctx::$database->dbtime * 1000, 2);
+            $totaltime = round((ftime() - $_SERVER["REQUEST_TIME_FLOAT"]) * 1000, 2);
+            $apptime = round($totaltime - $dbtime, 2);
+            header("Server-Timing: db;dur={$dbtime}, app;dur={$apptime}, total;dur={$totaltime}");
 
             foreach ($this->http_headers as $head) {
                 header($head);
@@ -121,7 +120,7 @@ class Page
      */
     public function display(): void
     {
-        Ctx::$tracer->begin("Display ({$this->mode->name})");
+        $span = Ctx::$tracer->startSpan("Display ({$this->mode->name})");
         match($this->mode) {
             PageMode::MANUAL => null,
             PageMode::PAGE => $this->display_page(),
@@ -130,6 +129,6 @@ class Page
             PageMode::FILE => $this->display_file(),
             PageMode::REDIRECT => $this->display_redirect(),
         };
-        Ctx::$tracer->end();
+        $span->end();
     }
 }

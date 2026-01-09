@@ -149,6 +149,13 @@ function ftime(): float
     return microtime(true);
 }
 
+/**
+ * Truncate a filename to a maximum length, preserving the extension.
+ *
+ * @param ?string $filename The filename to truncate, or null.
+ * @param int $max_len The maximum length of the filename, including the extension.
+ * @return ($filename is null ? null : string) The truncated filename, or null if the input was null.
+ */
 function truncate_filename(?string $filename, int $max_len = 250): ?string
 {
     if ($filename === null) {
@@ -222,7 +229,7 @@ function require_all(array $files): void
 
 function _load_ext_files(): void
 {
-    Ctx::$tracer->begin("Load Ext Files");
+    $span = Ctx::$tracer->startSpan("Load Ext Files");
     require_all(array_merge(
         Filesystem::zglob("ext/*/info.php"),
         Filesystem::zglob("ext/*/config.php"),
@@ -230,36 +237,29 @@ function _load_ext_files(): void
         Filesystem::zglob("ext/*/theme.php"),
         Filesystem::zglob("ext/*/main.php"),
     ));
-    Ctx::$tracer->end();
+    $span->end();
 }
 
 function _load_theme_files(): void
 {
-    Ctx::$tracer->begin("Load Theme Files");
+    $span = Ctx::$tracer->startSpan("Load Theme Files");
     $theme = get_theme();
     require_once('themes/'.$theme.'/page.class.php');
     require_all(Filesystem::zglob('themes/'.$theme.'/*.theme.php'));
-    Ctx::$tracer->end();
+    $span->end();
 }
 
 function _set_up_shimmie_environment(): void
 {
     if (file_exists("images") && !file_exists("data/images")) {
-        die_nicely("Upgrade error", "As of Shimmie 2.7 images and thumbs should be moved to data/images and data/thumbs");
+        die("As of Shimmie 2.7 images and thumbs should be moved to data/images and data/thumbs");
     }
 
     if (SysConfig::getTimezone()) {
         date_default_timezone_set(SysConfig::getTimezone());
     }
 
-    if (SysConfig::getDebug()) {
-        error_reporting(E_ALL);
-    }
-
-    // The trace system has a certain amount of memory consumption every time it is used,
-    // so to prevent running out of memory during complex operations code that uses it should
-    // check if tracer output is enabled before making use of it.
-    Ctx::$tracer_enabled = !is_null(SysConfig::getTraceFile());
+    error_reporting(E_ALL);
 }
 
 /**
@@ -379,7 +379,7 @@ function make_form(Url $target, bool $multipart = false, string $form_id = "", s
 const BYTE_DENOMINATIONS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
 function human_filesize(int $bytes, int $decimals = 2): string
 {
-    $factor = floor((strlen(strval($bytes)) - 1) / 3);
+    $factor = (int)floor((strlen(strval($bytes)) - 1) / 3);
     return sprintf("%.{$decimals}f", $bytes / pow(1024, $factor)) . @BYTE_DENOMINATIONS[$factor];
 }
 
@@ -449,7 +449,7 @@ function make_link(?string $page = null, QueryArray|array|null $query = null, ?s
     if (is_array($query)) {
         $query = new QueryArray($query);
     }
-    return new Url(page: $page ?? "", query: $query, fragment: $fragment);
+    return new Url(page: $page ?? Ctx::$config->get(SetupConfig::MAIN_PAGE), query: $query, fragment: $fragment);
 }
 
 /**
@@ -524,4 +524,40 @@ function _get_query(?string $uri = null): string
 
     assert(!str_starts_with($q, "/"));
     return $q;
+}
+
+/**
+ * @param non-empty-array<int|null> $comparison
+ */
+function compare_file_bytes(Path $file_name, array $comparison): bool
+{
+    $size = $file_name->filesize();
+    $cc = count($comparison);
+    if ($size < $cc) {
+        // Can't match because it's too small
+        return false;
+    }
+
+    if (($fh = @fopen($file_name->str(), 'rb'))) {
+        try {
+            $chunk = \Safe\unpack("C*", \Safe\fread($fh, $cc));
+
+            for ($i = 0; $i < $cc; $i++) {
+                $byte = $comparison[$i];
+                if ($byte === null) {
+                    continue;
+                } else {
+                    $fileByte = $chunk[$i + 1];
+                    if ($fileByte !== $byte) {
+                        return false;
+                    }
+                }
+            }
+            return true;
+        } finally {
+            @fclose($fh);
+        }
+    } else {
+        throw new MediaException("Unable to open file for byte check: {$file_name->str()}");
+    }
 }

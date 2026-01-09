@@ -46,13 +46,9 @@ final class ArchiveFileHandler extends DataHandlerExtension
         }
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    protected function media_check_properties(Image $image): ?MediaProperties
     {
-    }
-
-    // we don't actually do anything, just accept one upload and spawn several
-    protected function media_check_properties(MediaCheckPropertiesEvent $event): void
-    {
+        return null;
     }
 
     protected function check_contents(Path $tmpname): bool

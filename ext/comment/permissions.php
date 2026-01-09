@@ -14,9 +14,12 @@ final class CommentPermission extends PermissionGroup
     #[PermissionMeta("Delete")]
     public const DELETE_COMMENT = "delete_comment";
 
-    #[PermissionMeta("Bypass Checks", help: "Allow a user to make comments even if the spam-detector disapproves")]
-    public const BYPASS_COMMENT_CHECKS = "bypass_comment_checks";
-
     #[PermissionMeta("Skip CAPTCHA")]
     public const SKIP_CAPTCHA = "bypass_comment_captcha";
+
+    #[PermissionMeta("Bypass Comment Lock", help: "Allow a user to comment on posts with locked comments")]
+    public const BYPASS_COMMENT_LOCK = "bypass_comment_lock";
+
+    #[PermissionMeta("Edit Comment Lock", help: "Allow a user to lock/unlock comments on posts")]
+    public const EDIT_COMMENT_LOCK = "edit_comment_lock";
 }

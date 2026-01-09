@@ -16,13 +16,13 @@ class SQLite extends DBEngine
         $db->exec("PRAGMA foreign_keys = ON;");
         $db->sqliteCreateFunction('now', fn (): string => date("Y-m-d H:i:s"), 0);
         $db->sqliteCreateFunction('md5', fn (string $a): string => md5($a), 1);
-        $db->sqliteCreateFunction('lower', fn (string $a): string => mb_strtolower($a), 1);
+        $db->sqliteCreateFunction('lower', fn (?string $a): ?string => is_null($a) ? null : mb_strtolower($a), 1);
         $db->sqliteCreateFunction('rand', fn (): int => rand(), 0);
     }
 
     public function scoreql_to_sql(string $data): string
     {
-        $data = str_replace("SCORE_AIPK", "INTEGER PRIMARY KEY", $data);
+        $data = str_replace("SCORE_AIPK", "INTEGER PRIMARY KEY AUTOINCREMENT", $data);
         $data = str_replace("SCORE_INET", "VARCHAR(45)", $data);
         $data = preg_replace(DBEngine::ILIKE_PATTERN, "LOWER($1) LIKE LOWER($2) ESCAPE '\\'", $data);
         assert($data !== null, "preg_replace failed");

@@ -257,7 +257,7 @@ final class OuroborosAPI extends Extension
                 if ($p <= 0) {
                     $p = 1;
                 }
-                $tags = Tag::explode(@$_REQUEST['tags'] ?: '');
+                $tags = SearchTerm::explode(@$_REQUEST['tags'] ?: '');
                 $this->postIndex($limit, $p, $tags);
             } elseif ($event_args === 'tag/index' || $event_args === 'tag/list') {
                 $this->tryAuth();
@@ -380,12 +380,12 @@ final class OuroborosAPI extends Extension
 
     /**
      * Wrapper for getting a list of posts
-     * @param list<tag-string> $tags
+     * @param search-term-array $terms
      */
-    protected function postIndex(int $limit, int $page, array $tags): void
+    protected function postIndex(int $limit, int $page, array $terms): void
     {
         $start = ($page - 1) * $limit;
-        $results = Search::find_images(max($start, 0), min($limit, 100), $tags);
+        $results = Search::find_images(max($start, 0), min($limit, 100), $terms);
         $posts = [];
         foreach ($results as $img) {
             $posts[] = new _SafeOuroborosImage($img);
@@ -558,12 +558,10 @@ final class OuroborosAPI extends Extension
             $session = $_REQUEST['session'];
             $user = User::by_session($name, $session) ?? User::get_anonymous();
             send_event(new UserLoginEvent($user));
-        } elseif (isset($_COOKIE[SysConfig::getCookiePrefix() . '_' . 'session']) &&
-            isset($_COOKIE[SysConfig::getCookiePrefix() . '_' . 'user'])
-        ) {
+        } elseif (isset($_COOKIE['shm_session']) && isset($_COOKIE['shm_user'])) {
             //Auth by session data from cookies
-            $session = $_COOKIE[SysConfig::getCookiePrefix() . '_' . 'session'];
-            $user = $_COOKIE[SysConfig::getCookiePrefix() . '_' . 'user'];
+            $session = $_COOKIE['shm_session'];
+            $user = $_COOKIE['shm_user'];
             $user = User::by_session($user, $session) ?? User::get_anonymous();
             send_event(new UserLoginEvent($user));
         }

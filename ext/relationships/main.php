@@ -52,7 +52,7 @@ final class Relationships extends Extension
     public function onImageInfoSet(ImageInfoSetEvent $event): void
     {
         if (Ctx::$user->can(RelationshipsPermission::EDIT_IMAGE_RELATIONSHIPS)) {
-            if ($event->params['tags'] ? !\Safe\preg_match('/parent[=|:]/', $event->params->req("tags")) : true) { //Ignore parent if tags contain parent metatag
+            if ($event->params['tags'] ? !\Safe\preg_match('/parent[=:]/', $event->params->req("tags")) : true) { //Ignore parent if tags contain parent metatag
                 if ($event->params["parent"] ? int_escape($event->params["parent"]) : false) {
                     send_event(new ImageRelationshipSetEvent($event->image->id, (int) $event->params->req("parent")));
                 } else {
@@ -69,7 +69,7 @@ final class Relationships extends Extension
 
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
-        if ($matches = $event->matches("/^parent[=|:]([0-9]+|any|none)$/")) {
+        if ($matches = $event->matches("/^parent[=:]([0-9]+|any|none)$/")) {
             $parentID = $matches[1];
 
             if (\Safe\preg_match("/^(any|none)$/", $parentID)) {
@@ -78,9 +78,9 @@ final class Relationships extends Extension
             } else {
                 $event->add_querylet(new Querylet("images.parent_id = :pid", ["pid" => $parentID]));
             }
-        } elseif ($matches = $event->matches("/^child[=|:](any|none)$/")) {
+        } elseif ($matches = $event->matches("/^child[=:](any|none)$/")) {
             $not = ($matches[1] === "any" ? "=" : "!=");
-            $event->add_querylet(new Querylet("images.has_children $not :true", ["true" => true]));
+            $event->add_querylet(new Querylet("images.has_children $not TRUE"));
         }
     }
 
@@ -93,21 +93,21 @@ final class Relationships extends Extension
 
     public function onTagTermCheck(TagTermCheckEvent $event): void
     {
-        if ($event->matches("/^(parent|child)[=|:](.*)$/i")) {
+        if ($event->matches("/^(parent|child)[=:](.*)$/i")) {
             $event->metatag = true;
         }
     }
 
     public function onTagTermParse(TagTermParseEvent $event): void
     {
-        if ($matches = $event->matches("/^parent[=|:]([0-9]+|none)$/")) {
+        if ($matches = $event->matches("/^parent[=:]([0-9]+|none)$/")) {
             $parentID = $matches[1];
             if ($parentID === "none" || $parentID === "0") {
                 $this->remove_parent($event->image_id);
             } else {
                 send_event(new ImageRelationshipSetEvent($event->image_id, (int)$parentID));
             }
-        } elseif ($matches = $event->matches("/^child[=|:]([0-9]+)$/")) {
+        } elseif ($matches = $event->matches("/^child[=:]([0-9]+)$/")) {
             $childID = $matches[1];
             send_event(new ImageRelationshipSetEvent((int)$childID, $event->image_id));
         }
@@ -148,7 +148,7 @@ final class Relationships extends Extension
         }
 
         $database->execute("UPDATE images SET parent_id = :pid WHERE id = :cid", ["pid" => $event->parent_id, "cid" => $event->child_id]);
-        $database->execute("UPDATE images SET has_children = :true WHERE id = :pid", ["pid" => $event->parent_id, "true" => true]);
+        $database->execute("UPDATE images SET has_children = TRUE WHERE id = :pid", ["pid" => $event->parent_id]);
 
         if ($old_parent !== null) {
             $this->set_has_children($old_parent);

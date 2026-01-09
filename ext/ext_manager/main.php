@@ -34,17 +34,42 @@ final class ExtManager extends Extension
             } else {
                 throw new ServerError("The config file (data/config/extensions.conf.php) isn't writable by the web server :(");
             }
-        } elseif ($event->page_matches("ext_manager", method: "GET")) {
-            $is_admin = Ctx::$user->can(ExtManagerPermission::MANAGE_EXTENSION_LIST);
-            $this->theme->display_table($this->get_extensions($is_admin), $is_admin);
+        } elseif ($event->page_matches("ext_manager", method: "GET", permission: ExtManagerPermission::MANAGE_EXTENSION_LIST)) {
+            $this->theme->display_table($this->get_extensions());
         }
 
         if ($event->page_matches("ext_doc/{ext}")) {
             $ext = $event->get_arg('ext');
             $info = ExtensionInfo::get_all()[$ext];
             $this->theme->display_doc($info);
-        } elseif ($event->page_matches("ext_doc")) {
-            $this->theme->display_table($this->get_extensions(false), false);
+        }
+
+        // For https://github.com/shish/shimmie2/issues/2010
+        // Using the "internal" namespace as this is a prototype of a blind
+        // attempt to support clients which I'm not aware of, and may need
+        // to be changed without notice
+        if ($event->page_matches("api/internal/extensions")) {
+            $can_manage = Ctx::$user->can(ExtManagerPermission::MANAGE_EXTENSION_LIST);
+            $enabled = Extension::get_enabled_extensions();
+            $all_infos = ExtensionInfo::get_all();
+
+            $result = [];
+            foreach ($all_infos as $key => $info) {
+                // Skip based on visibility
+                if ($info->visibility === ExtensionVisibility::HIDDEN) {
+                    continue;
+                }
+                if ($info->visibility === ExtensionVisibility::ADMIN && !$can_manage) {
+                    continue;
+                }
+
+                // Only include if enabled
+                if (in_array($key, $enabled)) {
+                    $result[] = $key;
+                }
+            }
+
+            Ctx::$page->set_data(MimeType::JSON, \Safe\json_encode($result));
         }
     }
 
@@ -63,8 +88,6 @@ final class ExtManager extends Extension
         if ($event->parent === "system") {
             if (Ctx::$user->can(ExtManagerPermission::MANAGE_EXTENSION_LIST)) {
                 $event->add_nav_link(make_link('ext_manager'), "Extension Manager");
-            } else {
-                $event->add_nav_link(make_link('ext_doc'), "Board Help");
             }
         }
     }
@@ -94,12 +117,9 @@ final class ExtManager extends Extension
     /**
      * @return ExtensionInfo[]
      */
-    private function get_extensions(bool $all): array
+    private function get_extensions(): array
     {
         $extensions = array_values(ExtensionInfo::get_all());
-        if (!$all) {
-            $extensions = array_filter($extensions, fn ($x) => $x::is_enabled());
-        }
         usort($extensions, function ($a, $b) {
             if ($a->category->name !== $b->category->name) {
                 return $a->category->name <=> $b->category->name;

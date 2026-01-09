@@ -23,11 +23,11 @@ final class Index extends Extension
             || $event->page_matches("post/list/{search}", paged: true)
         ) {
             if ($event->GET->get('search')) {
-                Ctx::$page->set_redirect(search_link(Tag::explode($event->GET->get('search'), false)));
+                Ctx::$page->set_redirect(search_link(SearchTerm::explode($event->GET->get('search'))));
                 return;
             }
 
-            $search_terms = Tag::explode($event->get_arg('search', ""), false);
+            $search_terms = SearchTerm::explode($event->get_arg('search', ""));
             $count_search_terms = count($search_terms);
             $page_number = $event->get_iarg('page_num', 1);
             $page_size = Ctx::$config->get(IndexConfig::IMAGES);
@@ -107,7 +107,7 @@ final class Index extends Extension
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
         if ($event->key === HelpPages::SEARCH) {
-            $event->add_block(new Block("General", $this->theme->get_help_html()), 0);
+            $event->add_section("General", $this->theme->get_help_html(), 0);
         }
     }
 
@@ -131,7 +131,7 @@ final class Index extends Extension
             ->addOption('limit', null, InputOption::VALUE_REQUIRED, 'Number of results per page', default: 25)
             ->setDescription('Show the SQL generated for a given search query')
             ->setCode(function (InputInterface $input, OutputInterface $output): int {
-                $search = Tag::explode($input->getArgument('query'), false);
+                $search = SearchTerm::explode($input->getArgument('query'));
                 $page = $input->getOption('page');
                 $limit = $input->getOption('limit');
                 $count = $input->getOption('count');
@@ -169,28 +169,28 @@ final class Index extends Extension
     {
         global $database;
 
-        if ($matches = $event->matches("/^filesize([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])(\d+[kmg]?b?)$/i")) {
+        if ($matches = $event->matches("/^filesize(:|<=|<|=|>|>=)(\d+[kmg]?b?)$/i")) {
             $cmp = ltrim($matches[1], ":") ?: "=";
             $val = parse_shorthand_int($matches[2]);
             $event->add_querylet(new Querylet("images.filesize $cmp :val{$event->id}", ["val{$event->id}" => $val]));
-        } elseif ($matches = $event->matches("/^id=([\d,]+)$/i")) {
+        } elseif ($matches = $event->matches("/^id[=:]([\d,]+)$/i")) {
             $val = array_map(fn ($x) => int_escape($x), explode(",", $matches[1]));
             $set = implode(",", $val);
             $event->add_querylet(new Querylet("images.id IN ($set)"));
-        } elseif ($matches = $event->matches("/^id([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])(\d+)$/i")) {
+        } elseif ($matches = $event->matches("/^id(:|<=|<|=|>|>=)(\d+)$/i")) {
             $cmp = ltrim($matches[1], ":") ?: "=";
             $val = int_escape($matches[2]);
             $event->add_querylet(new Querylet("images.id $cmp :val{$event->id}", ["val{$event->id}" => $val]));
-        } elseif ($matches = $event->matches("/^(hash|md5)[=|:]([0-9a-fA-F]*)$/i")) {
+        } elseif ($matches = $event->matches("/^(hash|md5)[=:]([0-9a-fA-F]*)$/i")) {
             $hash = strtolower($matches[2]);
             $event->add_querylet(new Querylet('images.hash = :hash', ["hash" => $hash]));
-        } elseif ($matches = $event->matches("/^(phash)[=|:]([0-9a-fA-F]*)$/i")) {
+        } elseif ($matches = $event->matches("/^(phash)[=:]([0-9a-fA-F]*)$/i")) {
             $phash = strtolower($matches[2]);
             $event->add_querylet(new Querylet('images.phash = :phash', ["phash" => $phash]));
-        } elseif ($matches = $event->matches("/^(filename|name)[=|:](.+)$/i")) {
+        } elseif ($matches = $event->matches("/^(filename|name)[=:](.+)$/i")) {
             $filename = strtolower($matches[2]);
             $event->add_querylet(new Querylet("SCORE_ILIKE(images.filename, :filename{$event->id})", ["filename{$event->id}" => "%$filename%"]));
-        } elseif ($matches = $event->matches("/^posted([:]?<|[:]?>|[:]?<=|[:]?>=|[:|=])([0-9]{4}[-\/][0-9]{2}[-\/][0-9]{2})$/i")) {
+        } elseif ($matches = $event->matches("/^posted(:|<=|<|=|>|>=)([0-9]{4}[-\/][0-9]{2}[-\/][0-9]{2})$/i")) {
             $cmp = ltrim($matches[1], ":") ?: "=";
             $dt = new \Safe\DateTimeImmutable($matches[2]);
             if ($cmp === "=") {
@@ -204,17 +204,17 @@ final class Index extends Extension
                     ["posted{$event->id}" => $dt->format('Y-m-d')]
                 ));
             }
-        } elseif ($matches = $event->matches("/^order[=|:](id|width|height|length|filesize|filename)[_]?(desc|asc)?$/i")) {
+        } elseif ($matches = $event->matches("/^order[=:](id|width|height|length|filesize|filename)[_]?(desc|asc)?$/i")) {
             $ord = strtolower($matches[1]);
             $default_order_for_column = \Safe\preg_match("/^(id|filename)$/", $matches[1]) ? "ASC" : "DESC";
             $sort = isset($matches[2]) ? strtoupper($matches[2]) : $default_order_for_column;
             $event->order = "images.$ord $sort";
-        } elseif ($matches = $event->matches("/^order[=|:]random[_]([0-9]{1,8})$/i")) {
+        } elseif ($matches = $event->matches("/^order[=:]random[_]([0-9]{1,8})$/i")) {
             // requires a seed to avoid duplicates
             // since the tag can't be changed during the parseevent, we instead generate the seed during submit using js
             $seed = (int)$matches[1];
             $event->order = $database->seeded_random($seed, "images.id");
-        } elseif ($matches = $event->matches("/^order[=|:]dailyshuffle$/i")) {
+        } elseif ($matches = $event->matches("/^order[=:]dailyshuffle$/i")) {
             // will use today's date as seed, thus allowing for a dynamic randomized list without outside intervention.
             // This way the list will change every day, giving a more dynamic feel to the imageboard.
             // recommended to change homepage to "post/list/order:dailyshuffle/1"
