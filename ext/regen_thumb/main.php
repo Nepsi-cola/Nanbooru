@@ -13,17 +13,19 @@ final class RegenThumb extends Extension
 {
     public const KEY = "regen_thumb";
 
-    public function regenerate_thumbnail(Image $image, bool $force = true): bool
+    #[EventListener]
+    public function regenerate_thumbnail(Post $image, bool $force = true): bool
     {
         $event = send_event(new ThumbnailGenerationEvent($image, $force));
         Ctx::$cache->delete("thumb-block:{$image->id}");
         return $event->generated;
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("regen_thumb/one/{image_id}", method: "POST", permission: ImagePermission::DELETE_IMAGE)) {
-            $image = Image::by_id_ex($event->get_iarg('image_id'));
+            $image = Post::by_id_ex($event->get_iarg('image_id'));
 
             $this->regenerate_thumbnail($image);
 
@@ -31,7 +33,7 @@ final class RegenThumb extends Extension
         }
         if ($event->page_matches("regen_thumb/mass", method: "POST", permission: ImagePermission::DELETE_IMAGE)) {
             $tags = SearchTerm::explode(strtolower($event->POST->req('tags')));
-            $images = Search::find_images(limit: 10000, terms: $tags);
+            $images = Search::find_posts(limit: 10000, terms: $tags);
 
             foreach ($images as $image) {
                 $this->regenerate_thumbnail($image);
@@ -41,18 +43,21 @@ final class RegenThumb extends Extension
         }
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
             $event->add_button("Regenerate Thumbnail", "regen_thumb/one/{$event->image->id}");
         }
     }
 
+    #[EventListener]
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
         $event->add_action("regen-thumb", "Regen Thumbnails", block: $this->theme->bulk_html(), permission: ImagePermission::DELETE_IMAGE);
     }
 
+    #[EventListener]
     public function onBulkAction(BulkActionEvent $event): void
     {
         switch ($event->action) {
@@ -76,11 +81,13 @@ final class RegenThumb extends Extension
         }
     }
 
+    #[EventListener]
     public function onAdminBuilding(AdminBuildingEvent $event): void
     {
         $this->theme->display_admin_block();
     }
 
+    #[EventListener]
     public function onAdminAction(AdminActionEvent $event): void
     {
         switch ($event->action) {
@@ -99,12 +106,12 @@ final class RegenThumb extends Extension
                 if (isset($event->params["regen_thumb_mime"])) {
                     $mime = $event->params["regen_thumb_mime"];
                 }
-                $images = Search::find_images(terms: ["mime=" . $mime]);
+                $images = Search::find_posts(terms: ["mime=" . $mime]);
 
                 $i = 0;
                 foreach ($images as $image) {
                     if (!$force) {
-                        $path = Filesystem::warehouse_path(Image::THUMBNAIL_DIR, $image->hash, false);
+                        $path = Filesystem::warehouse_path(Post::THUMBNAIL_DIR, $image->hash, false);
                         if ($path->exists()) {
                             continue;
                         }
@@ -122,6 +129,7 @@ final class RegenThumb extends Extension
         }
     }
 
+    #[EventListener]
     public function onCliGen(CliGenEvent $event): void
     {
         $event->app->register('post:regen-thumb')
@@ -129,7 +137,7 @@ final class RegenThumb extends Extension
             ->setDescription("Regenerate a post's thumbnail")
             ->setCode(function (InputInterface $input, OutputInterface $output): int {
                 $uid = $input->getArgument('id_or_hash');
-                $image = Image::by_id_or_hash($uid);
+                $image = Post::by_id_or_hash($uid);
                 if ($image) {
                     send_event(new ThumbnailGenerationEvent($image, true));
                 } else {

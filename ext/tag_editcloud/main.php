@@ -9,7 +9,8 @@ final class TagEditCloud extends Extension
 {
     public const KEY = "tag_editcloud";
 
-    public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
+    #[EventListener]
+    public function onPostInfoBoxBuilding(PostInfoBoxBuildingEvent $event): void
     {
         if ($this->can_tag($event->image)) {
             $data = $this->get_cloud_data($event->image);
@@ -25,7 +26,7 @@ final class TagEditCloud extends Extension
     /**
      * @return array<array{tag: string, scaled: float, count: int}>|null
      */
-    private function get_cloud_data(Image $image): array|null
+    private function get_cloud_data(Post $image): array|null
     {
         global $database;
 
@@ -95,7 +96,7 @@ final class TagEditCloud extends Extension
         return $tag_data;
     }
 
-    private function can_tag(Image $image): bool
+    private function can_tag(Post $image): bool
     {
         return (
             Ctx::$user->can(PostTagsPermission::EDIT_IMAGE_TAG)

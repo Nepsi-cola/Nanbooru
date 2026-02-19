@@ -17,6 +17,7 @@ final class S3 extends Extension
     public const KEY = "s3";
     public int $synced = 0;
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;
@@ -31,6 +32,7 @@ final class S3 extends Extension
         }
     }
 
+    #[EventListener]
     public function onAdminBuilding(AdminBuildingEvent $event): void
     {
         global $database;
@@ -43,6 +45,7 @@ final class S3 extends Extension
         Ctx::$page->add_block(new Block("Process S3 Queue", $html));
     }
 
+    #[EventListener]
     public function onAdminAction(AdminActionEvent $event): void
     {
         global $database;
@@ -52,7 +55,7 @@ final class S3 extends Extension
                 ["count" => isset($event->params['count']) ? int_escape($event->params["count"]) : 10]
             ) as $row) {
                 if ($row['action'] === "S") {
-                    $image = Image::by_hash($row['hash']);
+                    $image = Post::by_hash($row['hash']);
                     if ($image) {
                         $this->sync_post($image);
                     }
@@ -64,6 +67,7 @@ final class S3 extends Extension
         }
     }
 
+    #[EventListener]
     public function onCliGen(CliGenEvent $event): void
     {
         $event->app->register('s3:process')
@@ -78,7 +82,7 @@ final class S3 extends Extension
                     ["count" => $input->getOption('count') ?? $count]
                 ) as $row) {
                     if ($row['action'] === "S") {
-                        $image = Image::by_hash($row['hash']);
+                        $image = Post::by_hash($row['hash']);
                         if ($image) {
                             $output->writeln("SYN {$row['hash']} ($image->id)");
                             $this->sync_post($image);
@@ -97,8 +101,9 @@ final class S3 extends Extension
             ->setDescription('Search for some images, and sync them to s3')
             ->setCode(function (InputInterface $input, OutputInterface $output): int {
                 $query = SearchTerm::explode($input->getArgument('query'));
-                foreach (Search::find_images_iterable(terms: $query) as $image) {
-                    print("{$image->id}: {$image->hash}\n");
+                foreach (Search::find_posts_iterable(terms: $query) as $image) {
+                    $output->writeln("{$image->id}: {$image->hash}");
+                    $this->sync_post($image);
                 }
                 return Command::SUCCESS;
             });
@@ -113,40 +118,46 @@ final class S3 extends Extension
             });
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("s3/sync/{image_id}", method: "POST", permission: ImagePermission::DELETE_IMAGE)) {
             $id = $event->get_iarg('image_id');
-            $this->sync_post(Image::by_id_ex($id));
+            $this->sync_post(Post::by_id_ex($id));
             Log::info("s3", "Manual resync for >>$id", "File re-sync'ed");
             Ctx::$page->set_redirect(make_link("post/view/$id"));
         }
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
             $event->add_button("CDN Re-Sync", "s3/sync/{$event->image->id}");
         }
     }
 
-    public function onImageAddition(ImageAdditionEvent $event): void
+    #[EventListener]
+    public function onPostAddition(PostAdditionEvent $event): void
     {
         // Tags aren't set at this point, let's wait for the TagSetEvent
         // $this->sync_post($event->image);
     }
 
+    #[EventListener]
     public function onTagSet(TagSetEvent $event): void
     {
         $this->sync_post($event->image, $event->new_tags);
     }
 
-    public function onImageDeletion(ImageDeletionEvent $event): void
+    #[EventListener]
+    public function onPostDeletion(PostDeletionEvent $event): void
     {
         $this->remove_file($event->image->hash);
     }
 
-    public function onImageReplace(ImageReplaceEvent $event): void
+    #[EventListener]
+    public function onImageReplace(MediaReplaceEvent $event): void
     {
         $this->remove_file($event->old_hash);
         $this->sync_post($event->image);
@@ -161,11 +172,13 @@ final class S3 extends Extension
             throw new ServerError("S3 credentials not set");
         }
         $endpoint = Ctx::$config->get(S3Config::ENDPOINT);
+        $region = Ctx::$config->get(S3Config::REGION);
 
         return new \S3Client\S3(
             $access_key_id,
             $access_key_secret,
             $endpoint,
+            $region
         );
     }
 
@@ -189,7 +202,7 @@ final class S3 extends Extension
     /**
      * @param list<tag-string>|null $new_tags
      */
-    private function sync_post(Image $image, ?array $new_tags = null): void
+    private function sync_post(Post $image, ?array $new_tags = null): void
     {
         if (defined("UNITTEST")) {
             return;
@@ -215,9 +228,9 @@ final class S3 extends Extension
                 $this->hash_to_path($image->hash),
                 $image->get_image_filename()->get_contents(),
                 [
-                    'ACL' => 'public-read',
-                    'ContentType' => (string)$image->get_mime(),
-                    'ContentDisposition' => "inline; filename=\"$friendly\"",
+                    'x-amz-acl' => 'public-read',
+                    'Content-Type' => (string)$image->get_mime(),
+                    'Content-Disposition' => "inline; filename=\"$friendly\"",
                 ]
             );
             $this->dequeue($image->hash);

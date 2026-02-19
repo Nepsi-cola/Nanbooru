@@ -7,7 +7,7 @@ namespace Shimmie2;
 final class LockSetEvent extends Event
 {
     public function __construct(
-        public Image $image,
+        public Post $image,
         public bool $locked
     ) {
         parent::__construct();
@@ -19,7 +19,8 @@ final class PostLock extends Extension
 {
     public const KEY = "post_lock";
 
-    public function onImageInfoSet(ImageInfoSetEvent $event): void
+    #[EventListener]
+    public function onPostInfoSet(PostInfoSetEvent $event): void
     {
         if ($event->image->is_locked() && !Ctx::$user->can(PostLockPermission::EDIT_IMAGE_LOCK)) {
             throw new PermissionDenied("Error: This image is locked and cannot be edited.");
@@ -30,6 +31,7 @@ final class PostLock extends Extension
         }
     }
 
+    #[EventListener]
     public function onLockSet(LockSetEvent $event): void
     {
         if (Ctx::$user->can(PostLockPermission::EDIT_IMAGE_LOCK)) {
@@ -37,7 +39,8 @@ final class PostLock extends Extension
         }
     }
 
-    public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
+    #[EventListener]
+    public function onPostInfoBoxBuilding(PostInfoBoxBuildingEvent $event): void
     {
         $event->add_part($this->theme->get_lock_editor_html($event->image), 42);
     }

@@ -85,6 +85,7 @@ final class BulkActions extends Extension
 {
     public const KEY = "bulk_actions";
 
+    #[EventListener]
     public function onPostListBuilding(PostListBuildingEvent $event): void
     {
         $babbe = new BulkActionBlockBuildingEvent();
@@ -102,6 +103,7 @@ final class BulkActions extends Extension
         $this->theme->display_selector($actions, SearchTerm::implode($event->search_terms));
     }
 
+    #[EventListener]
     public function onCliGen(CliGenEvent $event): void
     {
         foreach (send_event(new BulkActionBlockBuildingEvent())->actions as $action) {
@@ -119,13 +121,13 @@ final class BulkActions extends Extension
         }
     }
 
+    #[EventListener]
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
         $event->add_action("delete", "(D)elete", "d", "Delete selected images?", $this->theme->render_ban_reason_input(), 10, permission: ImagePermission::DELETE_IMAGE);
-        $event->add_action("tag", "Tag", "t", "", $this->theme->render_tag_input(), 10, permission: BulkActionsPermission::BULK_EDIT_IMAGE_TAG);
-        $event->add_action("source", "Set (S)ource", "s", "", $this->theme->render_source_input(), 10, permission: BulkActionsPermission::BULK_EDIT_IMAGE_SOURCE);
     }
 
+    #[EventListener]
     public function onBulkAction(BulkActionEvent $event): void
     {
         switch ($event->action) {
@@ -135,34 +137,10 @@ final class BulkActions extends Extension
                     $event->log_action("Deleted $i[0] items, totaling ".human_filesize($i[1]));
                 }
                 break;
-            case "tag":
-                if (!isset($event->params['bulk_tags'])) {
-                    return;
-                }
-                if (Ctx::$user->can(BulkActionsPermission::BULK_EDIT_IMAGE_TAG)) {
-                    $tags = $event->params['bulk_tags'];
-                    $replace = false;
-                    if (isset($event->params['bulk_tags_replace']) &&  $event->params['bulk_tags_replace'] === "true") {
-                        $replace = true;
-                    }
-
-                    $i = $this->tag_items($event->items, $tags, $replace);
-                    $event->log_action("Tagged $i items");
-                }
-                break;
-            case "source":
-                if (!isset($event->params['bulk_source'])) {
-                    return;
-                }
-                if (Ctx::$user->can(BulkActionsPermission::BULK_EDIT_IMAGE_SOURCE)) {
-                    $source = $event->params['bulk_source'];
-                    $i = $this->set_source($event->items, $source);
-                    $event->log_action("Set source for $i items");
-                }
-                break;
         }
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("bulk_action", method: "POST", permission: BulkActionsPermission::PERFORM_BULK_ACTIONS)) {
@@ -192,12 +170,12 @@ final class BulkActions extends Extension
 
     /**
      * @param int[] $data
-     * @return \Generator<Image>
+     * @return \Generator<Post>
      */
     private function yield_items(array $data): \Generator
     {
         foreach ($data as $id) {
-            $image = Image::by_id($id);
+            $image = Post::by_id($id);
             if ($image !== null) {
                 yield $image;
             }
@@ -205,12 +183,12 @@ final class BulkActions extends Extension
     }
 
     /**
-     * @return \Generator<Image>
+     * @return \Generator<Post>
      */
     private function yield_search_results(string $query): \Generator
     {
         $terms = SearchTerm::explode($query);
-        return Search::find_images_iterable(0, null, $terms);
+        return Search::find_posts_iterable(0, null, $terms);
     }
 
     /**
@@ -223,7 +201,7 @@ final class BulkActions extends Extension
     }
 
     /**
-     * @param iterable<Image> $posts
+     * @param iterable<Post> $posts
      * @return array{0: int, 1: int}
      */
     private function delete_posts(iterable $posts): array
@@ -238,7 +216,7 @@ final class BulkActions extends Extension
                         send_event(new AddImageHashBanEvent($post->hash, $reason));
                     }
                 }
-                send_event(new ImageDeletionEvent($post));
+                send_event(new PostDeletionEvent($post));
                 $total++;
                 $size += $post->filesize;
             } catch (\Exception $e) {
@@ -248,65 +226,5 @@ final class BulkActions extends Extension
         return [$total, $size];
     }
 
-    /**
-     * @param iterable<Image> $items
-     */
-    private function tag_items(iterable $items, string $tags, bool $replace): int
-    {
-        $tags = Tag::explode($tags);
 
-        $pos_tag_array = [];
-        $neg_tag_array = [];
-        foreach ($tags as $new_tag) {
-            if (str_starts_with($new_tag, '-')) {
-                $new_tag = substr($new_tag, 1);
-                assert($new_tag !== '');
-                $neg_tag_array[] = $new_tag;
-            } else {
-                $pos_tag_array[] = $new_tag;
-            }
-        }
-
-        $total = 0;
-        if ($replace) {
-            foreach ($items as $image) {
-                send_event(new TagSetEvent($image, $tags));
-                $total++;
-            }
-        } else {
-            foreach ($items as $image) {
-                $img_tags = array_map(strtolower(...), $image->get_tag_array());
-
-                if (!empty($neg_tag_array)) {
-                    $neg_tag_array = array_map(strtolower(...), $neg_tag_array);
-                    $img_tags = array_merge($pos_tag_array, $img_tags);
-                    $img_tags = array_diff($img_tags, $neg_tag_array);
-                } else {
-                    $img_tags = array_merge($tags, $img_tags);
-                }
-                $img_tags = array_filter($img_tags, fn ($tag) => !empty($tag));
-                send_event(new TagSetEvent($image, $img_tags));
-                $total++;
-            }
-        }
-
-        return $total;
-    }
-
-    /**
-     * @param iterable<Image> $items
-     */
-    private function set_source(iterable $items, string $source): int
-    {
-        $total = 0;
-        foreach ($items as $image) {
-            try {
-                send_event(new SourceSetEvent($image, $source));
-                $total++;
-            } catch (\Exception $e) {
-                Ctx::$page->flash("Error while setting source for {$image->id}: " . $e->getMessage());
-            }
-        }
-        return $total;
-    }
 }

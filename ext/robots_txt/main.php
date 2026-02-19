@@ -24,15 +24,17 @@ final class RobotsTxt extends Extension
 {
     public const KEY = "robots_txt";
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("robots.txt")) {
             $rbe = send_event(new RobotsBuildingEvent());
-            Ctx::$page->set_data(MimeType::TEXT, join("\n", $rbe->parts));
+            Ctx::$page->set_data(MimeType::TEXT, join("\n", $rbe->parts) . "\n");
         }
     }
 
 
+    #[EventListener]
     public function onRobotsBuilding(RobotsBuildingEvent $event): void
     {
         $domain = Ctx::$config->get(RobotsTxtConfig::CANONICAL_DOMAIN);

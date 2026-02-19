@@ -8,12 +8,13 @@ class Automatic1111Tagger extends Extension
 {
     public const KEY = "automatic1111_tagger";
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         // Handle interrogation request
         if ($event->page_matches("automatic1111_tagger/interrogate/{post_id}")) {
             $post_id = $event->get_iarg('post_id');
-            $image_obj = Image::by_id_ex($post_id);
+            $image_obj = Post::by_id_ex($post_id);
             $image_contents = $image_obj->get_image_filename()->get_contents();
             $image_data = base64_encode($image_contents);
             $payload = [
@@ -53,7 +54,7 @@ class Automatic1111Tagger extends Extension
 
         if ($event->page_matches("automatic1111_tagger/get_rating/{post_id}")) {
             $post_id = $event->get_iarg('post_id');
-            $image_obj = Image::by_id_ex($post_id);
+            $image_obj = Post::by_id_ex($post_id);
             $image_contents = $image_obj->get_image_filename()->get_contents();
             $image_data = base64_encode($image_contents);
             $payload = [
@@ -75,7 +76,7 @@ class Automatic1111Tagger extends Extension
     /**
      * @param array<string, int> $rating_arr
      */
-    private function handle_rating(Image $image_obj, array $rating_arr): void
+    private function handle_rating(Post $image_obj, array $rating_arr): void
     {
         $max_rating = null;
         $max_value = -1;
@@ -99,7 +100,8 @@ class Automatic1111Tagger extends Extension
         }
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(Automatic1111TaggerPermission::INTERROGATE_IMAGE)) {
             $event->add_button("Interrogate", "automatic1111_tagger/interrogate/{$event->image->id}");

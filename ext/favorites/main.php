@@ -22,12 +22,14 @@ final class Favorites extends Extension
 {
     public const KEY = "favorites";
 
+    #[EventListener]
     public function onInitExt(InitExtEvent $event): void
     {
-        Image::$prop_types["favorites"] = ImagePropType::INT;
+        Post::$prop_types["favorites"] = PostPropType::INT;
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(FavouritesPermission::EDIT_FAVOURITES)) {
             $user_id = Ctx::$user->id;
@@ -46,7 +48,8 @@ final class Favorites extends Extension
         }
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         $people = $this->list_persons_who_have_favorited($event->image);
         if (count($people) > 0) {
@@ -54,6 +57,7 @@ final class Favorites extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("favourite/add/{image_id}", method: "POST", permission: FavouritesPermission::EDIT_FAVOURITES)) {
@@ -68,9 +72,10 @@ final class Favorites extends Extension
         }
     }
 
+    #[EventListener]
     public function onUserPageBuilding(UserPageBuildingEvent $event): void
     {
-        $i_favorites_count = Search::count_images(["favorited_by={$event->display_user->name}"]);
+        $i_favorites_count = Search::count_posts(["favorited_by={$event->display_user->name}"]);
         $i_days_old = ((time() - \Safe\strtotime($event->display_user->join_date)) / 86400) + 1;
         $h_favorites_rate = sprintf("%.1f", ($i_favorites_count / $i_days_old));
         $favorites_link = search_link(["favorited_by={$event->display_user->name}"]);
@@ -80,7 +85,8 @@ final class Favorites extends Extension
         ));
     }
 
-    public function onImageInfoSet(ImageInfoSetEvent $event): void
+    #[EventListener]
+    public function onPostInfoSet(PostInfoSetEvent $event): void
     {
         $action = $event->get_param("favorite_action");
         if (
@@ -92,6 +98,7 @@ final class Favorites extends Extension
         }
     }
 
+    #[EventListener]
     public function onFavoriteSet(FavoriteSetEvent $event): void
     {
         $this->add_vote($event->image_id, Ctx::$user->id, $event->do_set);
@@ -99,21 +106,25 @@ final class Favorites extends Extension
 
     // FIXME: this should be handled by the foreign key. Check that it
     // is, and then remove this
-    public function onImageDeletion(ImageDeletionEvent $event): void
+    #[EventListener]
+    public function onPostDeletion(PostDeletionEvent $event): void
     {
         Ctx::$database->execute("DELETE FROM user_favorites WHERE image_id=:image_id", ["image_id" => $event->image->id]);
     }
 
+    #[EventListener]
     public function onParseLinkTemplate(ParseLinkTemplateEvent $event): void
     {
         $event->replace('$favorites', (string)$event->image['favorites']);
     }
 
+    #[EventListener]
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
         $event->add_link("My Favorites", search_link(["favorited_by=" . Ctx::$user->name]), 20);
     }
 
+    #[EventListener]
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^favorites(:|<=|<|=|>|>=)(\d+)$/i")) {
@@ -133,6 +144,7 @@ final class Favorites extends Extension
         }
     }
 
+    #[EventListener]
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
         if ($event->key === HelpPages::SEARCH) {
@@ -140,6 +152,7 @@ final class Favorites extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "posts") {
@@ -147,12 +160,14 @@ final class Favorites extends Extension
         }
     }
 
+    #[EventListener]
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
         $event->add_action("favorite", "Favorite", permission: FavouritesPermission::EDIT_FAVOURITES);
         $event->add_action("unfavorite", "Un-Favorite", permission: FavouritesPermission::EDIT_FAVOURITES);
     }
 
+    #[EventListener]
     public function onBulkAction(BulkActionEvent $event): void
     {
         switch ($event->action) {
@@ -179,6 +194,7 @@ final class Favorites extends Extension
         }
     }
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;
@@ -235,7 +251,7 @@ final class Favorites extends Extension
     /**
      * @return string[]
      */
-    private function list_persons_who_have_favorited(Image $image): array
+    private function list_persons_who_have_favorited(Post $image): array
     {
         global $database;
 

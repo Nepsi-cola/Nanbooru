@@ -77,27 +77,20 @@ function iterator_map_to_array(callable $callback, \Iterator $iter): array
     return iterator_to_array(iterator_map($callback, $iter));
 }
 
+/**
+ * @template TKey of array-key
+ * @template TValue
+ *
+ * @param array<TKey, TValue> $items
+ * @return \Generator<TKey, TValue>
+ */
+function array_to_generator(array $items): \Generator
+{
+    yield from $items;
+}
+
 ///////////////////////////////////////////////////////////////////////
 // Input / Output Sanitising
-
-/**
- * Make some data safe for printing into HTML
- */
-function html_escape(?string $input): string
-{
-    if (is_null($input)) {
-        return "";
-    }
-    return htmlentities($input, ENT_QUOTES, "UTF-8");
-}
-
-/**
- * Unescape data that was made safe for printing into HTML
- */
-function html_unescape(string $input): string
-{
-    return html_entity_decode($input, ENT_QUOTES, "UTF-8");
-}
 
 /**
  * Make sure some data is safe to be used in integer context

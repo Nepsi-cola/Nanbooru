@@ -12,6 +12,7 @@ final class Blocks extends Extension
 {
     public const KEY = "blocks";
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;
@@ -34,6 +35,7 @@ final class Blocks extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "system") {
@@ -43,6 +45,7 @@ final class Blocks extends Extension
         }
     }
 
+    #[EventListener]
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(BlocksPermission::MANAGE_BLOCKS)) {
@@ -50,6 +53,7 @@ final class Blocks extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         global $database;
@@ -57,7 +61,7 @@ final class Blocks extends Extension
 
         $blocks = cache_get_or_set("blocks", fn () => $database->get_all("SELECT * FROM blocks"), 600);
         foreach ($blocks as $block) {
-            $path = implode("/", $event->args);
+            $path = $event->path;
             if (strlen($path) < 4000 && fnmatch($block['pages'], $path)) {
                 # Split by comma, trimming whitespaces, and not allowing empty elements.
                 $userclasses = preg_split('/\s*,+\s*/', strtolower($block['userclass'] ?? ""), 0, PREG_SPLIT_NO_EMPTY);

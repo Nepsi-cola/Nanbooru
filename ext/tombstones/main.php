@@ -33,12 +33,7 @@ class Tombstones extends Extension
 {
     public const KEY = "tombstones";
 
-    public function get_priority(): int
-    {
-        // Before post/view
-        return 20;
-    }
-
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;
@@ -53,6 +48,7 @@ class Tombstones extends Extension
         }
     }
 
+    #[EventListener(priority: 20)] // Before /post/view
     public function onPageRequest(PageRequestEvent $event): void
     {
         global $database;
@@ -61,7 +57,7 @@ class Tombstones extends Extension
             $post_id = $event->get_iarg('post_id');
             $tombstone = $database->get_row("SELECT * FROM tombstones WHERE post_id=:post_id", ["post_id" => $post_id]);
             if (!is_null($tombstone)) {
-                if (!is_null(Image::by_id($post_id))) {
+                if (!is_null(Post::by_id($post_id))) {
                     // SQLite can re-use IDs of deleted rows, so if the
                     // post exists, ignore the tombstone
                     return;
@@ -86,7 +82,8 @@ class Tombstones extends Extension
         }
     }
 
-    public function onImageDeletion(ImageDeletionEvent $event): void
+    #[EventListener]
+    public function onPostDeletion(PostDeletionEvent $event): void
     {
         global $database;
 

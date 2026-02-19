@@ -9,19 +9,22 @@ final class Approval extends Extension
 {
     public const KEY = "approval";
 
+    #[EventListener]
     public function onInitExt(InitExtEvent $event): void
     {
-        Image::$prop_types["approved"] = ImagePropType::BOOL;
-        Image::$prop_types["approved_by_id"] = ImagePropType::INT;
+        Post::$prop_types["approved"] = PostPropType::BOOL;
+        Post::$prop_types["approved_by_id"] = PostPropType::INT;
     }
 
-    public function onImageAddition(ImageAdditionEvent $event): void
+    #[EventListener]
+    public function onPostAddition(PostAdditionEvent $event): void
     {
         if (defined("UNITTEST") || Ctx::$user->can(ApprovalPermission::BYPASS_IMAGE_APPROVAL)) {
             self::approve_image($event->image->id);
         }
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("approve_image/{image_id}", method: "POST", permission: ApprovalPermission::APPROVE_IMAGE)) {
@@ -37,11 +40,13 @@ final class Approval extends Extension
         }
     }
 
+    #[EventListener]
     public function onAdminBuilding(AdminBuildingEvent $event): void
     {
         $this->theme->display_admin_form();
     }
 
+    #[EventListener]
     public function onAdminAction(AdminActionEvent $event): void
     {
         global $database;
@@ -70,13 +75,15 @@ final class Approval extends Extension
         }
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         if (!$this->check_permissions($event->image)) {
             Ctx::$page->set_redirect(make_link());
         }
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "posts") {
@@ -86,6 +93,7 @@ final class Approval extends Extension
         }
     }
 
+    #[EventListener]
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
         if (!Ctx::$user->is_anonymous()) {
@@ -94,6 +102,8 @@ final class Approval extends Extension
     }
 
     public const SEARCH_REGEXP = "/^approved[=:](yes|no)/i";
+
+    #[EventListener]
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if (is_null($event->term) && $this->no_approval_query($event->context)) {
@@ -122,6 +132,7 @@ final class Approval extends Extension
         }
     }
 
+    #[EventListener]
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
         if ($event->key === HelpPages::SEARCH) {
@@ -164,7 +175,7 @@ final class Approval extends Extension
         );
     }
 
-    private function check_permissions(Image $image): bool
+    private function check_permissions(Post $image): bool
     {
         return (
             $image['approved']
@@ -173,7 +184,8 @@ final class Approval extends Extension
         );
     }
 
-    public function onImageDownloading(ImageDownloadingEvent $event): void
+    #[EventListener]
+    public function onMediaDownloading(MediaDownloadingEvent $event): void
     {
         /**
          * Deny images upon insufficient permissions.
@@ -183,7 +195,8 @@ final class Approval extends Extension
         }
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(ApprovalPermission::APPROVE_IMAGE)) {
             if ($event->image['approved'] === true) {
@@ -195,6 +208,7 @@ final class Approval extends Extension
         }
     }
 
+    #[EventListener]
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
         if (in_array("approved:no", $event->search_terms)) {
@@ -204,6 +218,7 @@ final class Approval extends Extension
         }
     }
 
+    #[EventListener]
     public function onBulkAction(BulkActionEvent $event): void
     {
         switch ($event->action) {
@@ -230,6 +245,7 @@ final class Approval extends Extension
         }
     }
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;

@@ -18,6 +18,8 @@ final class XMLSitemapURL
 final class XMLSitemap extends Extension
 {
     public const KEY = "sitemap";
+
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("sitemap.xml")) {
@@ -59,7 +61,7 @@ final class XMLSitemap extends Extension
         }
 
         /* --- Add latest images to sitemap with higher priority --- */
-        foreach (Search::find_images(limit: 50) as $image) {
+        foreach (Search::find_posts(limit: 50) as $image) {
             $urls[] = new XMLSitemapURL(
                 make_link("post/view/$image->id"),
                 "weekly",
@@ -79,7 +81,7 @@ final class XMLSitemap extends Extension
         }
 
         /* --- Add all other images to sitemap with lower priority --- */
-        foreach (Search::find_images(offset: 51, limit: 10000) as $image) {
+        foreach (Search::find_posts(offset: 51, limit: 10000) as $image) {
             $urls[] = new XMLSitemapURL(
                 make_link("post/view/$image->id"),
                 "monthly",

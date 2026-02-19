@@ -7,7 +7,7 @@ namespace Shimmie2;
 class PostTitleSetEvent extends Event
 {
     public function __construct(
-        public Image $image,
+        public Post $image,
         public string $title
     ) {
         parent::__construct();
@@ -19,16 +19,13 @@ final class PostTitles extends Extension
 {
     public const KEY = "post_titles";
 
-    public function get_priority(): int
-    {
-        return 60;
-    }
-
+    #[EventListener]
     public function onInitExt(InitExtEvent $event): void
     {
-        Image::$prop_types["title"] = ImagePropType::STRING;
+        Post::$prop_types["title"] = PostPropType::STRING;
     }
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;
@@ -39,14 +36,16 @@ final class PostTitles extends Extension
         }
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         if (Ctx::$config->get(PostTitlesConfig::SHOW_IN_WINDOW_TITLE)) {
             Ctx::$page->set_title(self::get_title($event->image));
         }
     }
 
-    public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
+    #[EventListener]
+    public function onPostInfoBoxBuilding(PostInfoBoxBuildingEvent $event): void
     {
         $event->add_part(
             $this->theme->get_title_set_html(
@@ -57,7 +56,17 @@ final class PostTitles extends Extension
         );
     }
 
-    public function onImageInfoSet(ImageInfoSetEvent $event): void
+    #[EventListener]
+    public function onPostInfoGet(PostInfoGetEvent $event): void
+    {
+        $title = $event->image['title'];
+        if ($title !== null) {
+            $event->params["title"] = $title;
+        }
+    }
+
+    #[EventListener]
+    public function onPostInfoSet(PostInfoSetEvent $event): void
     {
         $title = $event->get_param('title');
         if (Ctx::$user->can(PostTitlesPermission::EDIT_IMAGE_TITLE) && !is_null($title)) {
@@ -65,23 +74,13 @@ final class PostTitles extends Extension
         }
     }
 
+    #[EventListener]
     public function onPostTitleSet(PostTitleSetEvent $event): void
     {
         $this->set_title($event->image->id, $event->title);
     }
 
-    public function onBulkExport(BulkExportEvent $event): void
-    {
-        $event->fields["title"] = $event->image['title'];
-    }
-
-    public function onBulkImport(BulkImportEvent $event): void
-    {
-        if (array_key_exists("title", $event->fields) && $event->fields['title'] !== null) {
-            $this->set_title($event->image->id, $event->fields['title']);
-        }
-    }
-
+    #[EventListener(priority: 60)]
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^(title)[=:](.*)$/i")) {
@@ -102,7 +101,7 @@ final class PostTitles extends Extension
         Log::info("post_titles", "Title for >>{$image_id} set to: ".$title);
     }
 
-    public static function get_title(Image $image): string
+    public static function get_title(Post $image): string
     {
         $title = $image['title'] ?? "";
         if (empty($title) && Ctx::$config->get(PostTitlesConfig::DEFAULT_TO_FILENAME)) {

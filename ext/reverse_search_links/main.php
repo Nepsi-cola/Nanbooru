@@ -9,7 +9,8 @@ final class ReverseSearchLinks extends Extension
 {
     public const KEY = "reverse_search_links";
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         // only support image types
         $supported_types = [MimeType::JPEG, MimeType::GIF, MimeType::PNG, MimeType::WEBP];

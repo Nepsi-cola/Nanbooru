@@ -9,18 +9,20 @@ final class PrivateImage extends Extension
 {
     public const KEY = "private_image";
 
+    #[EventListener]
     public function onInitExt(InitExtEvent $event): void
     {
-        Image::$prop_types["private"] = ImagePropType::BOOL;
+        Post::$prop_types["private"] = PostPropType::BOOL;
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         $user = Ctx::$user;
 
         if ($event->page_matches("privatize_image/{image_id}", method: "POST", permission: PrivateImagePermission::SET_PRIVATE_IMAGE)) {
             $image_id = $event->get_iarg('image_id');
-            $image = Image::by_id_ex($image_id);
+            $image = Post::by_id_ex($image_id);
             if ($image->owner_id !== $user->id && !$user->can(PrivateImagePermission::SET_OTHERS_PRIVATE_IMAGES)) {
                 throw new PermissionDenied("Cannot set another user's image to private.");
             }
@@ -31,7 +33,7 @@ final class PrivateImage extends Extension
 
         if ($event->page_matches("publicize_image/{image_id}", method: "POST")) {
             $image_id = $event->get_iarg('image_id');
-            $image = Image::by_id_ex($image_id);
+            $image = Post::by_id_ex($image_id);
             if ($image->owner_id !== $user->id && !$user->can(PrivateImagePermission::SET_OTHERS_PRIVATE_IMAGES)) {
                 throw new PermissionDenied("Cannot set another user's image to public.");
             }
@@ -53,7 +55,8 @@ final class PrivateImage extends Extension
         }
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         if (
             $event->image['private'] === true
@@ -65,6 +68,8 @@ final class PrivateImage extends Extension
     }
 
     public const SEARCH_REGEXP = "/^private[=:](yes|no|any)/i";
+
+    #[EventListener]
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         $show_private = Ctx::$user->get_config()->get(PrivateImageUserConfig::VIEW_DEFAULT);
@@ -110,6 +115,7 @@ final class PrivateImage extends Extension
         }
     }
 
+    #[EventListener]
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
         if ($event->key === HelpPages::SEARCH) {
@@ -150,7 +156,8 @@ final class PrivateImage extends Extension
         );
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if ((Ctx::$user->can(PrivateImagePermission::SET_PRIVATE_IMAGE) && Ctx::$user->id === $event->image->owner_id) || Ctx::$user->can(PrivateImagePermission::SET_OTHERS_PRIVATE_IMAGES)) {
             if ($event->image['private'] === false) {
@@ -161,19 +168,22 @@ final class PrivateImage extends Extension
         }
     }
 
-    public function onImageAddition(ImageAdditionEvent $event): void
+    #[EventListener]
+    public function onPostAddition(PostAdditionEvent $event): void
     {
         if (Ctx::$user->get_config()->get(PrivateImageUserConfig::SET_DEFAULT) && Ctx::$user->can(PrivateImagePermission::SET_PRIVATE_IMAGE)) {
             self::privatize_image($event->image->id);
         }
     }
 
+    #[EventListener]
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
         $event->add_action("privatize-post", "Make Private", permission: PrivateImagePermission::SET_PRIVATE_IMAGE);
         $event->add_action("publicize-post", "Make Public", permission: PrivateImagePermission::SET_PRIVATE_IMAGE);
     }
 
+    #[EventListener]
     public function onBulkAction(BulkActionEvent $event): void
     {
         switch ($event->action) {
@@ -207,6 +217,7 @@ final class PrivateImage extends Extension
                 break;
         }
     }
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;

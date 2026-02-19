@@ -9,6 +9,7 @@ final class RandomList extends Extension
 {
     public const KEY = "random_list";
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("random")) {
@@ -31,7 +32,7 @@ final class RandomList extends Extension
             $images_per_page = Ctx::$config->get(RandomListConfig::LIST_COUNT);
             $random_images = [];
             for ($i = 0; $i < $images_per_page; $i++) {
-                $random_image = Image::by_random($search_terms);
+                $random_image = Post::by_random($search_terms);
                 if (!$random_image) {
                     continue;
                 }
@@ -42,6 +43,7 @@ final class RandomList extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "posts") {

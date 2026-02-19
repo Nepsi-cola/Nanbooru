@@ -9,13 +9,12 @@ use Symfony\Component\Console\Input\{InputArgument, InputInterface};
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
-require_once "events.php";
-
 /** @extends Extension<IndexTheme> */
 final class Index extends Extension
 {
     public const KEY = "index";
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if (
@@ -56,7 +55,7 @@ final class Index extends Extension
                 );
             }
 
-            $total_pages = (int)ceil(Search::count_images($search_terms) / Ctx::$config->get(IndexConfig::IMAGES));
+            $total_pages = (int)ceil(Search::count_posts($search_terms) / Ctx::$config->get(IndexConfig::IMAGES));
             if ($search_results_limit && $total_pages > $search_results_limit / $page_size && !Ctx::$user->can(IndexPermission::BIG_SEARCH)) {
                 $total_pages = (int)ceil($search_results_limit / $page_size);
             }
@@ -67,13 +66,13 @@ final class Index extends Extension
                     // extra caching for the first few post/list pages
                     $images = cache_get_or_set(
                         "post-list:$page_number",
-                        fn () => Search::find_images(($page_number - 1) * $page_size, $page_size, $search_terms),
+                        fn () => Search::find_posts(($page_number - 1) * $page_size, $page_size, $search_terms),
                         60
                     );
                 }
             }
             if (is_null($images)) {
-                $images = Search::find_images(($page_number - 1) * $page_size, $page_size, $search_terms);
+                $images = Search::find_posts(($page_number - 1) * $page_size, $page_size, $search_terms);
             }
 
             $count_images = count($images);
@@ -92,11 +91,13 @@ final class Index extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageNavBuilding(PageNavBuildingEvent $event): void
     {
         $event->add_nav_link(search_link(), "Posts", ["post"], category: "posts", order: 20);
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "posts") {
@@ -104,6 +105,7 @@ final class Index extends Extension
         }
     }
 
+    #[EventListener]
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
         if ($event->key === HelpPages::SEARCH) {
@@ -111,6 +113,7 @@ final class Index extends Extension
         }
     }
 
+    #[EventListener]
     public function onCliGen(CliGenEvent $event): void
     {
         $event->app->register('search')
@@ -118,7 +121,7 @@ final class Index extends Extension
             ->setDescription('Search the database and print results')
             ->setCode(function (InputInterface $input, OutputInterface $output): int {
                 $query = SearchTerm::explode($input->getArgument('query'));
-                $items = Search::find_images(limit: 1000, terms: $query);
+                $items = Search::find_posts(limit: 1000, terms: $query);
                 foreach ($items as $item) {
                     $output->writeln($item->hash);
                 }
@@ -165,6 +168,7 @@ final class Index extends Extension
             });
     }
 
+    #[EventListener(priority: 95)] // we want to turn a search term into a TagCondition only if nobody did anything else with that term
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         global $database;
@@ -226,11 +230,5 @@ final class Index extends Extension
         if (!is_null($event->term) && $event->order === null && $event->img_conditions === [] && $event->tag_conditions === []) {
             $event->add_tag_condition(new TagCondition($event->term, !$event->negative));
         }
-    }
-
-    public function get_priority(): int
-    {
-        // we want to turn a search term into a TagCondition only if nobody did anything else with that term
-        return 95;
     }
 }

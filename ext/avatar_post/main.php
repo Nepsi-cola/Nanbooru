@@ -13,11 +13,13 @@ final class AvatarPost extends AvatarExtension
 {
     public const KEY = "avatar_post";
 
-    public function get_priority(): int
+    #[EventListener(priority: 49)]
+    public function onBuildAvatar(BuildAvatarEvent $event): void
     {
-        return 49;
+        parent::onBuildAvatar($event);
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("set_avatar/{image_id}", method: "POST", permission: UserAccountsPermission::CHANGE_USER_SETTING)) {
@@ -37,13 +39,15 @@ final class AvatarPost extends AvatarExtension
         }
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(UserAccountsPermission::CHANGE_USER_SETTING)) {
             $event->add_button("Set Image As Avatar", "set_avatar/".$event->image->id);
         }
     }
 
+    #[EventListener]
     public function onConfigSave(ConfigSaveEvent $event): void
     {
         if (array_key_exists(AvatarPostUserConfig::AVATAR_ID, $event->values)) {
@@ -63,7 +67,7 @@ final class AvatarPost extends AvatarExtension
         if ($id === null) {
             return null;
         }
-        $image = Image::by_id($id);
+        $image = Post::by_id($id);
         if (!$image) {
             $user_config->delete(AvatarPostUserConfig::AVATAR_ID);
             return null;

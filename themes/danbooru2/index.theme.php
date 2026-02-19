@@ -13,7 +13,7 @@ use function MicroHTML\{INPUT,P};
 class Danbooru2IndexTheme extends IndexTheme
 {
     /**
-     * @param Image[] $images
+     * @param Post[] $images
      */
     public function display_page(array $images): void
     {
@@ -27,7 +27,7 @@ class Danbooru2IndexTheme extends IndexTheme
         if (count($images) > 0) {
             $this->display_page_images($images);
         } else {
-            throw new PostNotFound("No posts were found to match the search criteria");
+            $this->display_none_found();
         }
     }
 
@@ -58,7 +58,7 @@ class Danbooru2IndexTheme extends IndexTheme
     }
 
     /**
-     * @param Image[] $images
+     * @param Post[] $images
      */
     protected function build_table(array $images, ?string $query): HTMLElement
     {

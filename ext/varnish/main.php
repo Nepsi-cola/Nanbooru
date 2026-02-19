@@ -32,23 +32,21 @@ final class VarnishPurger extends Extension
         curl_close($ch);
     }
 
+    #[EventListener(priority: 99)]
     public function onCommentPosting(CommentPostingEvent $event): void
     {
         $this->curl_purge("post/view/{$event->image_id}");
     }
 
-    public function onImageInfoSet(ImageInfoSetEvent $event): void
+    #[EventListener(priority: 99)]
+    public function onPostInfoSet(PostInfoSetEvent $event): void
     {
         $this->curl_purge("post/view/{$event->image->id}");
     }
 
-    public function onImageDeletion(ImageDeletionEvent $event): void
+    #[EventListener(priority: 99)]
+    public function onPostDeletion(PostDeletionEvent $event): void
     {
         $this->curl_purge("post/view/{$event->image->id}");
-    }
-
-    public function get_priority(): int
-    {
-        return 99;
     }
 }

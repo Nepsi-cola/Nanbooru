@@ -19,10 +19,11 @@ final class Media extends Extension
         MimeType::PNG,
     ];
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("media_rescan/{image_id}", method: "POST", permission: MediaPermission::RESCAN_MEDIA)) {
-            $image = Image::by_id_ex($event->get_iarg('image_id'));
+            $image = Post::by_id_ex($event->get_iarg('image_id'));
 
             send_event(new MediaCheckPropertiesEvent($image));
             $image->save_to_db();
@@ -31,18 +32,21 @@ final class Media extends Extension
         }
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(ImagePermission::DELETE_IMAGE)) {
             $event->add_button("Scan Media Properties", "media_rescan/{$event->image->id}");
         }
     }
 
+    #[EventListener]
     public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
     {
         $event->add_action("media-rescan", "Scan Media Properties", permission: MediaPermission::RESCAN_MEDIA);
     }
 
+    #[EventListener]
     public function onBulkAction(BulkActionEvent $event): void
     {
         switch ($event->action) {
@@ -66,6 +70,7 @@ final class Media extends Extension
         }
     }
 
+    #[EventListener]
     public function onCliGen(CliGenEvent $event): void
     {
         $event->app->register('post:media-rescan')
@@ -73,7 +78,7 @@ final class Media extends Extension
             ->setDescription('Refresh metadata for a given post')
             ->setCode(function (InputInterface $input, OutputInterface $output): int {
                 $uid = $input->getArgument('id_or_hash');
-                $image = Image::by_id_or_hash($uid);
+                $image = Post::by_id_or_hash($uid);
                 if ($image) {
                     send_event(new MediaCheckPropertiesEvent($image));
                     $image->save_to_db();
@@ -87,6 +92,7 @@ final class Media extends Extension
     /**
      * @param MediaResizeEvent $event
      */
+    #[EventListener]
     public function onMediaResize(MediaResizeEvent $event): void
     {
         if (!in_array(
@@ -140,6 +146,7 @@ final class Media extends Extension
         }
     }
 
+    #[EventListener]
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^content[=:](video|audio|image|unknown)$/i")) {
@@ -170,6 +177,7 @@ final class Media extends Extension
         }
     }
 
+    #[EventListener]
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
         if ($event->key === HelpPages::SEARCH) {
@@ -177,6 +185,7 @@ final class Media extends Extension
         }
     }
 
+    #[EventListener]
     public function onParseLinkTemplate(ParseLinkTemplateEvent $event): void
     {
         if ($event->image->width && $event->image->height && $event->image->length) {
@@ -502,6 +511,7 @@ final class Media extends Extension
         return MimeType::matches_array($mime, self::ALPHA_FORMATS, true);
     }
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         $database = Ctx::$database;

@@ -18,9 +18,9 @@ final class NumericScoreVote
     public int $score;
 
     #[Field]
-    public function post(): Image
+    public function post(): Post
     {
-        return Image::by_id_ex($this->image_id);
+        return Post::by_id_ex($this->image_id);
     }
 
     #[Field]
@@ -30,7 +30,7 @@ final class NumericScoreVote
     }
 
     #[Field(extends: "Post")]
-    public static function score(Image $post): int
+    public static function score(Post $post): int
     {
         global $database;
         if ($post['score'] ?? null) {
@@ -46,7 +46,7 @@ final class NumericScoreVote
      * @return NumericScoreVote[]
      */
     #[Field(extends: "Post", type: "[NumericScoreVote!]!")]
-    public static function votes(Image $post): array
+    public static function votes(Post $post): array
     {
         global $database;
         $rows = $database->get_all(
@@ -65,7 +65,7 @@ final class NumericScoreVote
     }
 
     #[Field(extends: "Post", type: "Int!")]
-    public static function my_vote(Image $post): int
+    public static function my_vote(Post $post): int
     {
         return Ctx::$database->get_one(
             "SELECT score FROM numeric_score_votes WHERE image_id=:image_id AND user_id=:user_id",
@@ -101,27 +101,30 @@ final class NumericScore extends Extension
 {
     public const KEY = "numeric_score";
 
+    #[EventListener]
     public function onInitExt(InitExtEvent $event): void
     {
-        Image::$prop_types["numeric_score"] = ImagePropType::INT;
+        Post::$prop_types["numeric_score"] = PostPropType::INT;
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         if (Ctx::$user->can(NumericScorePermission::CREATE_VOTE)) {
             $this->theme->get_voter($event->image);
         }
     }
 
+    #[EventListener]
     public function onUserPageBuilding(UserPageBuildingEvent $event): void
     {
         if (Ctx::$user->can(NumericScorePermission::EDIT_OTHER_VOTE)) {
             $this->theme->get_nuller($event->display_user);
         }
 
-        $n_up = Search::count_images(["upvoted_by={$event->display_user->name}"]);
+        $n_up = Search::count_posts(["upvoted_by={$event->display_user->name}"]);
         $link_up = search_link(["upvoted_by={$event->display_user->name}"]);
-        $n_down = Search::count_images(["downvoted_by={$event->display_user->name}"]);
+        $n_down = Search::count_posts(["downvoted_by={$event->display_user->name}"]);
         $link_down = search_link(["downvoted_by={$event->display_user->name}"]);
         $event->add_part(emptyHTML(
             A(["href" => $link_up], "$n_up Upvotes"),
@@ -130,6 +133,7 @@ final class NumericScore extends Extension
         ));
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         global $database;
@@ -247,22 +251,25 @@ final class NumericScore extends Extension
 
             //filter images by score != 0 + date > limit to max images on one page > order from highest to lowest score
             $ids = $database->get_col($sql, $args);
-            $images = Search::get_images($ids);
+            $images = Search::get_posts($ids);
             $this->theme->view_popular($images, $current, $b_dte, $f_dte);
         }
     }
 
+    #[EventListener]
     public function onNumericScoreSet(NumericScoreSetEvent $event): void
     {
         Log::debug("numeric_score", "Rated >>{$event->image_id} as {$event->score}", "Rated Post");
         $this->add_vote($event->image_id, Ctx::$user->id, $event->score);
     }
 
-    public function onImageDeletion(ImageDeletionEvent $event): void
+    #[EventListener]
+    public function onPostDeletion(PostDeletionEvent $event): void
     {
         Ctx::$database->execute("DELETE FROM numeric_score_votes WHERE image_id=:id", ["id" => $event->image->id]);
     }
 
+    #[EventListener]
     public function onUserDeletion(UserDeletionEvent $event): void
     {
         $this->delete_votes_by($event->id);
@@ -301,11 +308,13 @@ final class NumericScore extends Extension
         }
     }
 
+    #[EventListener]
     public function onParseLinkTemplate(ParseLinkTemplateEvent $event): void
     {
         $event->replace('$score', (string)$event->image['numeric_score']);
     }
 
+    #[EventListener]
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
         if ($event->key === HelpPages::SEARCH) {
@@ -313,6 +322,7 @@ final class NumericScore extends Extension
         }
     }
 
+    #[EventListener]
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^score(:|<=|<|=|>|>=)(-?\d+)$/i")) {
@@ -350,6 +360,7 @@ final class NumericScore extends Extension
         }
     }
 
+    #[EventListener]
     public function onTagTermCheck(TagTermCheckEvent $event): void
     {
         if ($event->matches("/^vote[=:](up|down|remove)$/i")) {
@@ -357,6 +368,7 @@ final class NumericScore extends Extension
         }
     }
 
+    #[EventListener]
     public function onTagTermParse(TagTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^vote[=:](up|down|remove)$/")) {
@@ -367,6 +379,7 @@ final class NumericScore extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "posts") {
@@ -376,6 +389,7 @@ final class NumericScore extends Extension
         }
     }
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;

@@ -11,6 +11,7 @@ final class Home extends Extension
 {
     public const KEY = "home";
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("home")) {
@@ -42,7 +43,7 @@ final class Home extends Extension
             format_text($main_links),
             Ctx::$config->get(HomeConfig::TEXT),
             contact_link(),
-            Search::count_images(),
+            Search::count_posts(),
         );
     }
 }

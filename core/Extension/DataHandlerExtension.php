@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use function MicroHTML\DIV;
+
 /**
  * A common base class for data handler extensions
  *
@@ -29,6 +31,7 @@ abstract class DataHandlerExtension extends Extension
     /** @var string[] */
     protected const SUPPORTED_MIME = [];
 
+    #[EventListener]
     public function onDataUpload(DataUploadEvent $event): void
     {
         if ($this->supported_mime($event->mime)) {
@@ -37,7 +40,7 @@ abstract class DataHandlerExtension extends Extension
                 throw new UploadException("Invalid or corrupted file");
             }
 
-            $existing = Image::by_hash($event->tmpname->md5());
+            $existing = Post::by_hash($event->tmpname->md5());
             if (!is_null($existing)) {
                 if (Ctx::$config->get(UploadConfig::COLLISION_HANDLER) === 'merge') {
                     // Right now tags are the only thing that get merged, so
@@ -57,7 +60,7 @@ abstract class DataHandlerExtension extends Extension
             // Create a new Image object
             $filename = $event->tmpname;
             assert($filename->is_readable());
-            $image = new Image();
+            $image = new Post();
             $image->tmp_file = $filename;
             $filesize = $filename->filesize();
             if ($filesize === 0) {
@@ -75,11 +78,11 @@ abstract class DataHandlerExtension extends Extension
             }
             $image->save_to_db(); // Ensure the image has a DB-assigned ID
 
-            $iae = send_event(new ImageAdditionEvent($image));
-            send_event(new ImageInfoSetEvent($image, $event->slot, $event->metadata));
+            $iae = send_event(new PostAdditionEvent($image));
+            send_event(new PostInfoSetEvent($image, $event->slot, $event->metadata));
 
             // If everything is OK, then move the file to the archive
-            $filename = Filesystem::warehouse_path(Image::IMAGE_DIR, $event->hash);
+            $filename = Filesystem::warehouse_path(Post::IMAGE_DIR, $event->hash);
             try {
                 $event->tmpname->copy($filename);
             } catch (\Exception $e) {
@@ -90,6 +93,7 @@ abstract class DataHandlerExtension extends Extension
         }
     }
 
+    #[EventListener]
     public function onThumbnailGeneration(ThumbnailGenerationEvent $event): void
     {
         $result = false;
@@ -109,11 +113,20 @@ abstract class DataHandlerExtension extends Extension
         }
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         if ($this->supported_mime($event->image->get_mime())) {
+            $attrs = [
+                "id" => "shm_post_media",
+                "data-handler" => static::KEY,
+                "data-mime" => $event->image->get_mime(),
+            ];
+            foreach (send_event(new PostInfoGetEvent($event->image))->params->toArray() as $key => $value) {
+                $attrs["data-$key"] = $value;
+            }
             // @phpstan-ignore-next-line
-            $media = $this->theme->build_media($event->image);
+            $media = DIV($attrs, $this->theme->build_media($event->image));
             Ctx::$page->add_block(new Block(null, $media, "main", 10, id: static::KEY . "_media"));
             if (Ctx::$config->get(ImageConfig::SHOW_META) && method_exists($this->theme, "display_metadata")) {
                 $this->theme->display_metadata($event->image);
@@ -121,6 +134,7 @@ abstract class DataHandlerExtension extends Extension
         }
     }
 
+    #[EventListener]
     public function onMediaCheckProperties(MediaCheckPropertiesEvent $event): void
     {
         if ($this->supported_mime($event->image->get_mime())) {
@@ -142,15 +156,16 @@ abstract class DataHandlerExtension extends Extension
         }
     }
 
-    abstract protected function media_check_properties(Image $image): ?MediaProperties;
+    abstract protected function media_check_properties(Post $image): ?MediaProperties;
     abstract protected function check_contents(Path $tmpname): bool;
-    abstract protected function create_thumb(Image $image): bool;
+    abstract protected function create_thumb(Post $image): bool;
 
     protected function supported_mime(MimeType $mime): bool
     {
         return MimeType::matches_array($mime, $this::SUPPORTED_MIME);
     }
 
+    #[EventListener]
     public function onBuildSupportedMimes(BuildSupportedMimesEvent $event): void
     {
         $event->add_mimes(array_map(fn ($mime) => new MimeType($mime), $this::SUPPORTED_MIME));

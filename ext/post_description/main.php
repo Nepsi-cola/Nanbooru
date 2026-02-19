@@ -19,6 +19,7 @@ final class PostDescription extends Extension
 {
     public const KEY = "post_description";
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         global $database;
@@ -34,7 +35,21 @@ final class PostDescription extends Extension
         }
     }
 
-    public function onImageInfoSet(ImageInfoSetEvent $event): void
+    #[EventListener]
+    public function onPostInfoGet(PostInfoGetEvent $event): void
+    {
+        global $database;
+        $description = (string) $database->get_one(
+            "SELECT description FROM image_descriptions WHERE image_id = :id",
+            ["id" => $event->image->id]
+        ) ?: null;
+        if ($description !== null) {
+            $event->params["description"] = $description;
+        }
+    }
+
+    #[EventListener]
+    public function onPostInfoSet(PostInfoSetEvent $event): void
     {
         $description = $event->get_param("description");
         if (Ctx::$user->can(PostDescriptionPermission::EDIT_IMAGE_DESCRIPTIONS) && $description) {
@@ -42,6 +57,7 @@ final class PostDescription extends Extension
         }
     }
 
+    #[EventListener]
     public function onPostDescriptionSet(PostDescriptionSetEvent $event): void
     {
         global $database;
@@ -58,7 +74,8 @@ final class PostDescription extends Extension
         ", ["id" => $event->image_id, "description" => $event->description]);
     }
 
-    public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
+    #[EventListener]
+    public function onPostInfoBoxBuilding(PostInfoBoxBuildingEvent $event): void
     {
         global $database;
 

@@ -9,9 +9,10 @@ final class Statistics extends Extension
 {
     public const KEY = "statistics";
 
-    /** @var String[] */
+    /** @var string[] */
     private array $unlisted = ['anonymous', 'ghost'];
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("stats") || $event->page_matches("stats/100")) {
@@ -70,11 +71,13 @@ final class Statistics extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageNavBuilding(PageNavBuildingEvent $event): void
     {
         $event->add_nav_link(make_link('stats'), "Stats", category: "stats");
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "stats") {
@@ -88,24 +91,6 @@ final class Statistics extends Extension
      */
     private function get_tag_stats(array $unlisted): array
     {
-        // Returns the username and tags from each tag history entry. This includes Anonymous tag histories to prevent their tagging being ignored and credited to the next user to edit.
-        $tag_stats = Ctx::$database->get_all("
-            SELECT users.class,users.name,tag_histories.tags,tag_histories.image_id
-            FROM tag_histories
-            INNER JOIN users
-                ON users.id = tag_histories.user_id
-            WHERE 1=1
-            ORDER BY tag_histories.id
-        ");
-
-        // Group tag history entries by image id
-        $tag_histories = [];
-        foreach ($tag_stats as $ts) {
-            $tag_history = ['class' => $ts['class'], 'name' => $ts['name'], 'tags' => $ts['tags']];
-            $id = $ts['image_id'];
-            array_key_exists($id, $tag_histories) ? array_push($tag_histories[$id], $tag_history) : $tag_histories[$id] = [$tag_history];
-        }
-
         // Grab alias list so we can ignore those changes
         // While this strategy may discount some change made before those aliases were implemented, it is preferable over crediting the changes made by an alias to whoever edits the tags next.
         $alias_db = Ctx::$database->get_all("SELECT * FROM aliases WHERE 1=1");
@@ -114,30 +99,53 @@ final class Statistics extends Extension
             $aliases[$alias['oldtag']] = $alias['newtag'];
         }
 
+        // Returns the username and tags from each tag history entry. This includes Anonymous tag histories to prevent their tagging being ignored and credited to the next user to edit.
+        $tag_stats = Ctx::$database->get_all("
+            SELECT users.class,users.name,tag_histories.tags,tag_histories.image_id
+            FROM tag_histories
+            INNER JOIN users
+                ON users.id = tag_histories.user_id
+            WHERE 1=1
+            ORDER BY tag_histories.image_id, tag_histories.id
+        ");
+
+
         // Count changes made in each tag history and tally tags for users
         $tag_tally = [];
         $change_tally = [];
-        foreach (array_values($tag_histories) as $image) {
-            $prev = [];
-            foreach ($image as $change) {
-                $curr = explode(' ', $change['tags']);
-                foreach ($curr as $i => $tag) {
-                    if (array_key_exists($tag, $aliases)) {
-                        $curr[$i] = $aliases[$tag];
-                    }
+        $prev_image_id = 0;
+        $prev = [];
+        foreach ($tag_stats as $ts) {
+            $name = (string)$ts['name'];
+            $curr = explode(' ', $ts['tags']);
+            foreach ($curr as $i => $tag) {
+                if (array_key_exists($tag, $aliases)) {
+                    $curr[$i] = $aliases[$tag];
                 }
-                if (!in_array($change['class'], $unlisted)) {
-                    $name = (string)$change['name'];
+            }
+            if ($prev_image_id === $ts['image_id']) {
+                if (!in_array($ts['class'], $unlisted)) {
                     if (!isset($tag_tally[$name])) {
                         $tag_tally[$name] = 0;
                         $change_tally[$name] = 0;
                     }
-                    $tag_tally[$name] += count(array_diff($curr, $prev));
                     $change_tally[$name] += 1;
+                    $tag_tally[$name] += count(array_diff($curr, $prev));
                 }
-                $prev = $curr;
+            } else {
+                if (!in_array($ts['class'], $unlisted)) {
+                    if (!isset($tag_tally[$name])) {
+                        $tag_tally[$name] = 0;
+                        $change_tally[$name] = 0;
+                    }
+                    $change_tally[$name] += 1;
+                    $tag_tally[$name] += count($curr);
+                }
+                $prev_image_id = $ts['image_id'];
             }
+            $prev = $curr;
         }
+
         return [$tag_tally, $change_tally];
     }
 

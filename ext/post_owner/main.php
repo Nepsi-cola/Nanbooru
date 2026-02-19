@@ -7,7 +7,7 @@ namespace Shimmie2;
 final class OwnerSetEvent extends Event
 {
     public function __construct(
-        public Image $image,
+        public Post $image,
         public User $owner
     ) {
         parent::__construct();
@@ -19,7 +19,8 @@ final class PostOwner extends Extension
 {
     public const KEY = "post_owner";
 
-    public function onImageInfoSet(ImageInfoSetEvent $event): void
+    #[EventListener]
+    public function onPostInfoSet(PostInfoSetEvent $event): void
     {
         $owner = $event->get_param('owner');
         if (Ctx::$user->can(PostOwnerPermission::EDIT_IMAGE_OWNER) && !is_null($owner)) {
@@ -28,6 +29,7 @@ final class PostOwner extends Extension
         }
     }
 
+    #[EventListener]
     public function onOwnerSet(OwnerSetEvent $event): void
     {
         if (Ctx::$user->can(PostOwnerPermission::EDIT_IMAGE_OWNER)) {
@@ -35,7 +37,8 @@ final class PostOwner extends Extension
         }
     }
 
-    public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
+    #[EventListener]
+    public function onPostInfoBoxBuilding(PostInfoBoxBuildingEvent $event): void
     {
         $event->add_part($this->theme->get_owner_editor_html($event->image), 39);
 

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Shimmie2;
 
+use function MicroHTML\{B, BODY, CODE, H1, HEAD, HTML, P, PRE, TITLE, emptyHTML};
+
 use MicroHTML\HTMLElement;
 
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *\
@@ -232,6 +234,7 @@ function _load_ext_files(): void
     $span = Ctx::$tracer->startSpan("Load Ext Files");
     require_all(array_merge(
         Filesystem::zglob("ext/*/info.php"),
+        Filesystem::zglob("ext/*/events.php"),
         Filesystem::zglob("ext/*/config.php"),
         Filesystem::zglob("ext/*/permissions.php"),
         Filesystem::zglob("ext/*/theme.php"),
@@ -258,8 +261,6 @@ function _set_up_shimmie_environment(): void
     if (SysConfig::getTimezone()) {
         date_default_timezone_set(SysConfig::getTimezone());
     }
-
-    error_reporting(E_ALL);
 }
 
 /**
@@ -299,30 +300,36 @@ function _fatal_error(\Throwable $e): void
         $query = is_a($e, DatabaseException::class) ? $e->query : null;
         $code = is_a($e, SCoreException::class) ? $e->http_code : 500;
 
-        $q = "";
+        $db_info = null;
         if (is_a($e, DatabaseException::class)) {
-            $q .= "<p><b>Query:</b> " . html_escape($query);
-            $q .= "<p><b>Args:</b> " . html_escape(var_export($e->args, true));
+            $db_info = emptyHTML(
+                P(B("Query: "), $query),
+                P(B("Args: "), var_export($e->args, true))
+            );
         }
+
         if ($code >= 500) {
             error_log("Shimmie Error: $message (Query: $query)\n{$e->getTraceAsString()}");
         }
+
         header("HTTP/1.0 $code Error");
-        echo '
-<!doctype html>
-<html lang="en">
-	<head>
-		<title>Internal Error</title>
-	</head>
-	<body>
-		<h1>Internal Error</h1>
-		<p><b>Message:</b> '.$e::class . ": " . html_escape($message).'
-		'.$q.'
-		<p><b>Version:</b> '.$version.' (on '.$phpver.')
-        <p><b>Stack Trace:</b></p><pre><code>'.$e->getTraceAsString().'</code></pre>
-	</body>
-</html>
-';
+
+        $html = HTML(
+            ["lang" => "en"],
+            HEAD(
+                TITLE("Internal Error")
+            ),
+            BODY(
+                H1("Internal Error"),
+                P(B("Message: "), $e::class . ": " . $message),
+                $db_info,
+                P(B("Version: "), "$version (on $phpver)"),
+                P(B("Stack Trace:")),
+                PRE(CODE($e->getTraceAsString()))
+            )
+        );
+
+        echo "<!doctype html>\n" . $html;
     }
 }
 

@@ -8,13 +8,13 @@ final class StaticFiles extends Extension
 {
     public const KEY = "static_files";
 
+    #[EventListener(priority: 98)] // Before 404
     public function onPageRequest(PageRequestEvent $event): void
     {
         $page = Ctx::$page;
         // hax.
         if ($page->mode === PageMode::PAGE && $this->count_main($page->blocks) === 0) {
-            $h_pagename = html_escape(implode('/', $event->args));
-            $f_pagename = \Safe\preg_replace("/[^a-z_\-\.]+/", "_", $h_pagename);
+            $f_pagename = \Safe\preg_replace("/[^a-z_\-\.]+/", "_", $event->path);
             $theme_name = Ctx::$config->get(SetupConfig::THEME);
 
             $theme_file = "themes/$theme_name/static/$f_pagename";
@@ -43,9 +43,4 @@ final class StaticFiles extends Extension
         }
         return $n;
     }
-
-    public function get_priority(): int
-    {
-        return 98;
-    }  // before 404
 }

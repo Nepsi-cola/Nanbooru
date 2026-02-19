@@ -33,18 +33,25 @@ final class ImageReport
 }
 
 /**
- * @phpstan-type Report array{id: int, image: Image, reason: string, reporter_name: string}
+ * @phpstan-type Report array{id: int, image: Post, reason: string, reporter_name: string}
  * @extends Extension<ReportImageTheme>
  */
 final class ReportImage extends Extension
 {
     public const KEY = "report_image";
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if ($event->page_matches("image_report/add")) {
+            $reason = $event->POST->req('reason');
+            if (trim($reason) === "") {
+                throw new ReportPostingException("Reports need text...");
+            } elseif (strlen($reason) > 300) {
+                throw new ReportPostingException("Report too long~");
+            }
             $image_id = int_escape($event->POST->req('image_id'));
-            send_event(new AddReportedImageEvent(new ImageReport($image_id, Ctx::$user->id, $event->POST->req('reason'))));
+            send_event(new AddReportedImageEvent(new ImageReport($image_id, Ctx::$user->id, $reason)));
             Ctx::$page->set_redirect(make_link("post/view/$image_id"));
         }
         if ($event->page_matches("image_report/remove", method: "POST", permission: ReportImagePermission::VIEW_IMAGE_REPORT)) {
@@ -60,6 +67,7 @@ final class ReportImage extends Extension
         }
     }
 
+    #[EventListener]
     public function onAddReportedImage(AddReportedImageEvent $event): void
     {
         Log::info("report_image", "Adding report of >>{$event->report->image_id} with reason '{$event->report->reason}'");
@@ -71,12 +79,14 @@ final class ReportImage extends Extension
         Ctx::$cache->delete("image-report-count");
     }
 
+    #[EventListener]
     public function onRemoveReportedImage(RemoveReportedImageEvent $event): void
     {
         Ctx::$database->execute("DELETE FROM image_reports WHERE id = :id", ["id" => $event->id]);
         Ctx::$cache->delete("image-report-count");
     }
 
+    #[EventListener]
     public function onUserPageBuilding(UserPageBuildingEvent $event): void
     {
         if (Ctx::$user->can(ReportImagePermission::VIEW_IMAGE_REPORT)) {
@@ -84,7 +94,8 @@ final class ReportImage extends Extension
         }
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         if (Ctx::$user->can(ReportImagePermission::CREATE_IMAGE_REPORT)) {
             $reps = $this->get_reports($event->image);
@@ -93,6 +104,7 @@ final class ReportImage extends Extension
     }
 
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "system") {
@@ -105,6 +117,7 @@ final class ReportImage extends Extension
         }
     }
 
+    #[EventListener]
     public function onUserBlockBuilding(UserBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(ReportImagePermission::VIEW_IMAGE_REPORT)) {
@@ -114,12 +127,14 @@ final class ReportImage extends Extension
         }
     }
 
-    public function onImageDeletion(ImageDeletionEvent $event): void
+    #[EventListener]
+    public function onPostDeletion(PostDeletionEvent $event): void
     {
         Ctx::$database->execute("DELETE FROM image_reports WHERE image_id = :image_id", ["image_id" => $event->image->id]);
         Ctx::$cache->delete("image-report-count");
     }
 
+    #[EventListener]
     public function onUserDeletion(UserDeletionEvent $event): void
     {
         $this->delete_reports_by($event->id);
@@ -131,6 +146,7 @@ final class ReportImage extends Extension
         Ctx::$cache->delete("image-report-count");
     }
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         $database = Ctx::$database;
@@ -151,7 +167,7 @@ final class ReportImage extends Extension
     /**
      * @return ImageReport[]
      */
-    public function get_reports(Image $image): array
+    public function get_reports(Post $image): array
     {
         $rows = Ctx::$database->get_all("
 			SELECT *
@@ -179,7 +195,7 @@ final class ReportImage extends Extension
         $reports = [];
         foreach ($all_reports as $report) {
             $image_id = (int)$report['image_id'];
-            $image = Image::by_id($image_id);
+            $image = Post::by_id($image_id);
             if (is_null($image)) {
                 send_event(new RemoveReportedImageEvent((int)$report['id']));
                 continue;

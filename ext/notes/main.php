@@ -13,11 +13,13 @@ final class Notes extends Extension
 {
     public const KEY = "notes";
 
+    #[EventListener]
     public function onInitExt(InitExtEvent $event): void
     {
-        Image::$prop_types["notes"] = ImagePropType::INT;
+        Post::$prop_types["notes"] = PostPropType::INT;
     }
 
+    #[EventListener]
     public function onDatabaseUpgrade(DatabaseUpgradeEvent $event): void
     {
         $database = Ctx::$database;
@@ -90,11 +92,13 @@ final class Notes extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageNavBuilding(PageNavBuildingEvent $event): void
     {
         $event->add_nav_link(make_link('note/requests'), "Notes", category: "note");
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "note") {
@@ -104,6 +108,7 @@ final class Notes extends Extension
         }
     }
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         $page = Ctx::$page;
@@ -160,12 +165,14 @@ final class Notes extends Extension
         }
     }
 
+    #[EventListener]
     public function onRobotsBuilding(RobotsBuildingEvent $event): void
     {
         $event->add_disallow("note_history");
     }
 
-    public function onDisplayingImage(DisplayingImageEvent $event): void
+    #[EventListener]
+    public function onDisplayingPost(DisplayingPostEvent $event): void
     {
         $this->theme->display_note_system(
             $event->image->id,
@@ -175,7 +182,8 @@ final class Notes extends Extension
         );
     }
 
-    public function onImageAdminBlockBuilding(ImageAdminBlockBuildingEvent $event): void
+    #[EventListener]
+    public function onPostAdminBlockBuilding(PostAdminBlockBuildingEvent $event): void
     {
         if (Ctx::$user->can(NotesPermission::CREATE)) {
             $event->add_part($this->theme->note_button($event->image->id));
@@ -191,6 +199,7 @@ final class Notes extends Extension
         $event->add_button("View Note History", "note_history/{$event->image->id}", 20);
     }
 
+    #[EventListener]
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^note[=:](.*)$/i")) {
@@ -209,6 +218,7 @@ final class Notes extends Extension
         }
     }
 
+    #[EventListener]
     public function onHelpPageBuilding(HelpPageBuildingEvent $event): void
     {
         if ($event->key === HelpPages::SEARCH) {
@@ -348,7 +358,7 @@ final class Notes extends Extension
 
         $images = [];
         foreach ($image_ids as $id) {
-            $images[] = Image::by_id_ex($id);
+            $images[] = Post::by_id_ex($id);
         }
 
         $this->theme->display_note_list($images, $pageNumber + 1, $totalPages);
@@ -376,7 +386,7 @@ final class Notes extends Extension
 
         $images = [];
         while ($row = $result->fetch()) {
-            $images[] = Image::by_id_ex($row["image_id"]);
+            $images[] = Post::by_id_ex($row["image_id"]);
         }
 
         $this->theme->display_note_requests($images, $pageNumber + 1, $totalPages);

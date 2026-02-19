@@ -12,15 +12,10 @@ final class AvatarGravatar extends AvatarExtension
 {
     public const KEY = "avatar_gravatar";
 
-    public function get_priority(): int
-    {
-        return 50;
-    }
-
     public function avatar_html(User $user): HTMLElement|null
     {
         if (!empty($user->email)) {
-            $hash = md5(strtolower($user->email));
+            $hash = hash('sha256', strtolower($user->email));
             $s = Ctx::$config->get(SetupConfig::AVATAR_SIZE);
             $d = urlencode(Ctx::$config->get(AvatarGravatarConfig::GRAVATAR_DEFAULT));
             $r = Ctx::$config->get(AvatarGravatarConfig::GRAVATAR_RATING);

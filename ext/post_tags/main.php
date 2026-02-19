@@ -21,7 +21,7 @@ final class TagSetException extends UserError
 
 final class TagSetEvent extends Event
 {
-    public Image $image;
+    public Post $image;
     /** @var list<tag-string> */
     public array $old_tags;
     /** @var list<tag-string> */
@@ -32,7 +32,7 @@ final class TagSetEvent extends Event
     /**
      * @param tag-string[] $tags
      */
-    public function __construct(Image $image, array $tags)
+    public function __construct(Post $image, array $tags)
     {
         parent::__construct();
         $this->image    = $image;
@@ -119,6 +119,7 @@ final class PostTags extends Extension
 {
     public const KEY = "post_tags";
 
+    #[EventListener]
     public function onPageRequest(PageRequestEvent $event): void
     {
         if (Ctx::$config->get(PostTagsConfig::FORCE_LOWERCASE)) {
@@ -130,6 +131,7 @@ final class PostTags extends Extension
         }
     }
 
+    #[EventListener]
     public function onCliGen(CliGenEvent $event): void
     {
         $event->app->register('tag-replace')
@@ -145,7 +147,14 @@ final class PostTags extends Extension
             });
     }
 
-    public function onImageInfoSet(ImageInfoSetEvent $event): void
+    #[EventListener]
+    public function onPostInfoGet(PostInfoGetEvent $event): void
+    {
+        $event->params['tags'] = $event->image->get_tag_list();
+    }
+
+    #[EventListener]
+    public function onPostInfoSet(PostInfoSetEvent $event): void
     {
         if (
             Ctx::$user->can(PostTagsPermission::EDIT_IMAGE_TAG) && (
@@ -170,6 +179,7 @@ final class PostTags extends Extension
         }
     }
 
+    #[EventListener]
     public function onSearchTermParse(SearchTermParseEvent $event): void
     {
         if ($matches = $event->matches("/^tags(:|<=|<|=|>|>=)(\d+)$/i")) {
@@ -188,6 +198,7 @@ final class PostTags extends Extension
         }
     }
 
+    #[EventListener]
     public function onTagSet(TagSetEvent $event): void
     {
         if (Ctx::$user->can(PostTagsPermission::EDIT_IMAGE_TAG) && (!$event->image->is_locked() || Ctx::$user->can(PostLockPermission::EDIT_IMAGE_LOCK))) {
@@ -198,16 +209,45 @@ final class PostTags extends Extension
         }
     }
 
-    public function onImageDeletion(ImageDeletionEvent $event): void
+    #[EventListener]
+    public function onPostDeletion(PostDeletionEvent $event): void
     {
         $event->image->delete_tags_from_image();
     }
 
+    #[EventListener]
+    public function onBulkActionBlockBuilding(BulkActionBlockBuildingEvent $event): void
+    {
+        $event->add_action("tag", "Tag", "t", "", $this->theme->render_tag_input(), 10, permission: PostTagsPermission::BULK_EDIT_IMAGE_TAG);
+    }
+
+    #[EventListener]
+    public function onBulkAction(BulkActionEvent $event): void
+    {
+        if ($event->action === "tag") {
+            if (!isset($event->params['bulk_tags'])) {
+                return;
+            }
+            if (Ctx::$user->can(PostTagsPermission::BULK_EDIT_IMAGE_TAG)) {
+                $tags = $event->params['bulk_tags'];
+                $replace = false;
+                if (isset($event->params['bulk_tags_replace']) &&  $event->params['bulk_tags_replace'] === "true") {
+                    $replace = true;
+                }
+
+                $i = $this->tag_items($event->items, $tags, $replace);
+                $event->log_action("Tagged $i items");
+            }
+        }
+    }
+
+    #[EventListener]
     public function onAdminBuilding(AdminBuildingEvent $event): void
     {
         $this->theme->display_mass_editor();
     }
 
+    #[EventListener]
     public function onPageSubNavBuilding(PageSubNavBuildingEvent $event): void
     {
         if ($event->parent === "tags") {
@@ -218,16 +258,19 @@ final class PostTags extends Extension
     /**
      * When an alias is added, oldtag becomes inaccessible.
      */
+    #[EventListener]
     public function onAddAlias(AddAliasEvent $event): void
     {
         $this->mass_tag_edit($event->oldtag, $event->newtag, false);
     }
 
-    public function onImageInfoBoxBuilding(ImageInfoBoxBuildingEvent $event): void
+    #[EventListener]
+    public function onPostInfoBoxBuilding(PostInfoBoxBuildingEvent $event): void
     {
         $event->add_part($this->theme->get_tag_editor_html($event->image), 40);
     }
 
+    #[EventListener]
     public function onParseLinkTemplate(ParseLinkTemplateEvent $event): void
     {
         // get_tag_list can trigger a database query,
@@ -241,16 +284,19 @@ final class PostTags extends Extension
     }
 
 
+    #[EventListener]
     public function onUploadHeaderBuilding(UploadHeaderBuildingEvent $event): void
     {
         $event->add_part("Tags", 10);
     }
 
+    #[EventListener]
     public function onUploadCommonBuilding(UploadCommonBuildingEvent $event): void
     {
         $event->add_part($this->theme->get_upload_common_html(), 10);
     }
 
+    #[EventListener]
     public function onUploadSpecificBuilding(UploadSpecificBuildingEvent $event): void
     {
         $event->add_part($this->theme->get_upload_specific_html($event->suffix), 10);
@@ -266,7 +312,7 @@ final class PostTags extends Extension
         Log::info("tag_edit", "Mass editing tags: '$search' -> '$replace'");
 
         if (count($search_set) === 1 && count($replace_set) === 1) {
-            $images = Search::find_images(limit: 10, terms: $replace_set);
+            $images = Search::find_posts(limit: 10, terms: $replace_set);
             if (count($images) === 0) {
                 Log::info("tag_edit", "No images found with target tag, doing in-place rename");
                 $database->execute(
@@ -292,7 +338,7 @@ final class PostTags extends Extension
                 $search_forward[] = "id<$last_id";
             }
 
-            $images = Search::find_images(limit: 100, terms: $search_forward);
+            $images = Search::find_posts(limit: 100, terms: $search_forward);
             if (count($images) === 0) {
                 break;
             }
@@ -311,5 +357,50 @@ final class PostTags extends Extension
                 $database->begin_transaction();
             }
         }
+    }
+
+    /**
+     * @param iterable<Post> $items
+     */
+    private function tag_items(iterable $items, string $tags, bool $replace): int
+    {
+        $tags = Tag::explode($tags);
+
+        $pos_tag_array = [];
+        $neg_tag_array = [];
+        foreach ($tags as $new_tag) {
+            if (str_starts_with($new_tag, '-')) {
+                $new_tag = substr($new_tag, 1);
+                assert($new_tag !== '');
+                $neg_tag_array[] = $new_tag;
+            } else {
+                $pos_tag_array[] = $new_tag;
+            }
+        }
+
+        $total = 0;
+        if ($replace) {
+            foreach ($items as $image) {
+                send_event(new TagSetEvent($image, $tags));
+                $total++;
+            }
+        } else {
+            foreach ($items as $image) {
+                $img_tags = array_map(strtolower(...), $image->get_tag_array());
+
+                if (!empty($neg_tag_array)) {
+                    $neg_tag_array = array_map(strtolower(...), $neg_tag_array);
+                    $img_tags = array_merge($pos_tag_array, $img_tags);
+                    $img_tags = array_diff($img_tags, $neg_tag_array);
+                } else {
+                    $img_tags = array_merge($tags, $img_tags);
+                }
+                $img_tags = array_filter($img_tags, fn ($tag) => !empty($tag));
+                send_event(new TagSetEvent($image, $img_tags));
+                $total++;
+            }
+        }
+
+        return $total;
     }
 }
